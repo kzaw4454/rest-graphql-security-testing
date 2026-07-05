@@ -10,7 +10,7 @@ graphene>=3.3
 
 # Security Testing & Benchmarking
 python-owasp-zap-v2.4>=0.0.21
-graphql-cop>=1.13
+#graphql-cop>=1.13
 pyjwt>=2.8.0
 cryptography>=41.0.3
 bandit>=1.7.5

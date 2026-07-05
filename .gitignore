@@ -246,3 +246,6 @@ benchmarks/**/*.html
 # Anything accidentally pinned locally for vulnerable apps (keep configs, not runtime state)
 vulnerable_apps/**/*.db
 vulnerable_apps/**/*.sqlite3
+
+# Personal notes
+zmynotes.txt
