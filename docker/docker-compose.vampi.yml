@@ -1,0 +1,15 @@
+services:
+  vampi:
+    image: erev0s/vampi:latest
+    container_name: vampi
+    ports:
+      - "5001:5000"
+    environment:
+      - vulnerable=1
+      - tokentimetolive=18000
+    networks:
+      - vampi-net
+
+networks:
+  vampi-net:
+    driver: bridge
