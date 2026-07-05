@@ -1,0 +1,47 @@
+# Testing Orchestration
+pytest>=7.4.0
+pytest-asyncio>=0.21.1
+
+# API Interaction
+requests>=2.31.0
+httpx>=0.24.1
+gql[all]>=3.4.1
+graphene>=3.3
+
+# Security Testing & Benchmarking
+python-owasp-zap-v2.4>=0.0.21
+graphql-cop>=1.13
+pyjwt>=2.8.0
+cryptography>=41.0.3
+bandit>=1.7.5
+safety>=2.3.5
+
+# Containerization
+docker>=6.1.3
+
+# Reporting & Visualization
+pandas>=2.0.3
+matplotlib>=3.7.2
+seaborn>=0.12.2
+jinja2>=3.1.2
+weasyprint>=60.1
+
+# Configuration Management
+pyyaml>=6.0.1
+python-dotenv>=1.0.0
+
+# Logging
+loguru>=0.7.0
+colorlog>=6.7.0
+
+# Statistical Analysis
+numpy>=1.25.2
+scipy>=1.11.2
+pingouin>=0.5.3
+
+# Development Tooling
+black>=23.9.1
+flake8>=6.1.0
+pylint>=3.0.1
+mypy>=1.5.1
+pre-commit>=3.4.0

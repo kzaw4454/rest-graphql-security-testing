@@ -216,3 +216,33 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# ============================================
+# Project-specific: rest-graphql-security-testing
+# ============================================
+
+# Scan outputs, logs, generated reports (per CLAUDE.md — local only, not committed)
+results/
+
+# Local test/scan configuration (may contain target URLs, tokens, scan scope)
+# Keep tracked templates like config/*.example.yaml if it is added
+config/*.yaml
+config/*.yml
+config/*.json
+!config/*.example.yaml
+!config/*.example.yml
+
+# Docker volumes / persisted container data for vulnerable targets
+docker/**/data/
+docker/**/volumes/
+vulnerable_apps/**/data/
+
+# Benchmark tool outputs (OWASP ZAP, GraphQL Cop reports)
+benchmarks/**/output/
+benchmarks/**/*.json
+benchmarks/**/*.html
+!benchmarks/**/notes/
+
+# Anything accidentally pinned locally for vulnerable apps (keep configs, not runtime state)
+vulnerable_apps/**/*.db
+vulnerable_apps/**/*.sqlite3
