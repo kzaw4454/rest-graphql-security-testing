@@ -20,7 +20,7 @@ import logging
 import uuid
 from typing import Any
 
-from src.utils.api_client import APIClient
+from src.utils.vampi_client import VAmPIClient
 from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ class BOLABookAccessTest(VulnerabilityTest):
     name = "bola_book_secret_access"
     owasp_category = "API1:2023 Broken Object Level Authorization"
 
-    def __init__(self, architecture: str, target: str, client: APIClient) -> None:
+    def __init__(self, architecture: str, target: str, client: VAmPIClient) -> None:
         super().__init__(architecture, target)
         self.client = client
 
@@ -165,7 +165,7 @@ class BOLABookAccessTest(VulnerabilityTest):
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
-    client = APIClient.from_config("config/vampi.yaml")
+    client = VAmPIClient.from_config("config/vampi.yaml")
     test = BOLABookAccessTest(architecture="rest", target="vampi", client=client)
 
     for result in test.run():

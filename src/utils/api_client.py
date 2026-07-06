@@ -1,11 +1,14 @@
 """
-Shared REST API client for interacting with vulnerable test targets (e.g. VAmPI).
+Generic REST API client base for interacting with vulnerable test targets.
 
-Reads target configuration and test credentials from config/*.yaml rather than
-hardcoding them in source, per project convention (see CLAUDE.md).
+Reads target configuration from config/*.yaml rather than hardcoding it in
+source, per project convention (see CLAUDE.md).
 
-This module handles connection/auth mechanics only. It does not contain any
-vulnerability test logic — that lives in src/vulnerabilities/.
+This module handles connection/auth transport mechanics only. It does not
+contain any target-specific behavior (payload shapes, auth flows, seed
+endpoints) or vulnerability test logic — target-specific clients subclass
+RESTAPIClient (e.g. src/utils/vampi_client.py), and vulnerability test logic
+lives in src/vulnerabilities/.
 """
 
 from __future__ import annotations
@@ -24,16 +27,17 @@ class ConfigError(Exception):
     """Raised when the target config file is missing or malformed."""
 
 
-class APIClient:
+class RESTAPIClient:
     """
     Thin wrapper around `requests` for a single REST target, driven by a
     YAML config file (e.g. config/vampi.yaml).
 
+    Target-specific subclasses add auth flows and endpoint-specific methods
+    (see VAmPIClient in src/utils/vampi_client.py).
+
     Usage:
-        client = APIClient.from_config("config/vampi.yaml")
-        client.register("attacker")
-        token = client.login("attacker")
-        resp = client.get("/books/v1/some-title", as_user="attacker")
+        client = SomeTargetClient.from_config("config/some_target.yaml")
+        resp = client.get("/some/path", as_user="attacker")
     """
 
     def __init__(self, config: dict[str, Any]) -> None:
@@ -55,7 +59,7 @@ class APIClient:
         self.session = requests.Session()
 
     @classmethod
-    def from_config(cls, config_path: str | Path) -> "APIClient":
+    def from_config(cls, config_path: str | Path) -> "RESTAPIClient":
         path = Path(config_path)
         if not path.exists():
             raise ConfigError(f"Config file not found: {path}")
@@ -79,43 +83,6 @@ class APIClient:
             headers[self.token_header] = f"{self.token_prefix} {token}"
         return headers
 
-    def seed_database(self) -> requests.Response:
-        """Hit the createdb endpoint to (re)populate dummy data."""
-        path = self.endpoints.get("createdb", "/createdb")
-        resp = self.session.get(self._url(path), timeout=self.timeout)
-        logger.info("Seed DB: %s -> %s", path, resp.status_code)
-        return resp
-
-    def register(self, role: str) -> requests.Response:
-        """Register a test user identified by role (e.g. 'attacker', 'victim')."""
-        user = self._require_user(role)
-        path = self.endpoints.get("register", "/users/v1/register")
-        payload = {
-            "username": user["username"],
-            "password": user["password"],
-            "email": user["email"],
-        }
-        resp = self.session.post(self._url(path), json=payload, timeout=self.timeout)
-        logger.info("Register '%s': %s -> %s", role, path, resp.status_code)
-        return resp
-
-    def login(self, role: str) -> str:
-        """Log in a test user and store their token for later requests."""
-        user = self._require_user(role)
-        path = self.endpoints.get("login", "/users/v1/login")
-        payload = {"username": user["username"], "password": user["password"]}
-        resp = self.session.post(self._url(path), json=payload, timeout=self.timeout)
-        resp.raise_for_status()
-
-        data = resp.json()
-        token = data.get("auth_token")
-        if not token:
-            raise RuntimeError(f"Login response for '{role}' did not contain a token: {data}")
-
-        self._tokens[role] = token
-        logger.info("Login '%s': token stored", role)
-        return token
-
     def get(self, path: str, as_user: Optional[str] = None, **kwargs: Any) -> requests.Response:
         return self.session.get(
             self._url(path), headers=self._headers_for(as_user), timeout=self.timeout, **kwargs
@@ -135,9 +102,3 @@ class APIClient:
         return self.session.delete(
             self._url(path), headers=self._headers_for(as_user), timeout=self.timeout, **kwargs
         )
-
-    def _require_user(self, role: str) -> dict[str, str]:
-        user = self.test_users.get(role)
-        if not user:
-            raise ConfigError(f"No test user configured for role '{role}' in config file")
-        return user
