@@ -9,6 +9,7 @@ field name in login responses, and the /createdb reseed endpoint.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import requests
 
@@ -19,6 +20,14 @@ logger = logging.getLogger(__name__)
 
 class VAmPIClient(RESTAPIClient):
     """RESTAPIClient subclass wired to VAmPI's auth flow and reseed endpoint."""
+
+    @property
+    def scan_config(self) -> dict[str, Any]:
+        """The config file's `scan:` section (e.g. sqli_payloads) — RESTAPIClient
+        only parses `target`/`auth`/`test_users`, so vulnerability modules that
+        need config-driven scan scope read it through here rather than
+        reaching into the client's private config dict directly."""
+        return self._config.get("scan", {})
 
     def seed_database(self) -> requests.Response:
         """Hit the createdb endpoint to (re)populate dummy data."""
