@@ -149,15 +149,9 @@ services:
       - COMMUNITY_SERVICE=crapi-community:${COMMUNITY_SERVER_PORT:-8087}
       - IDENTITY_SERVICE=crapi-identity:${IDENTITY_SERVER_PORT:-8080}
       - WORKSHOP_SERVICE=crapi-workshop:${WORKSHOP_SERVER_PORT:-8000}
-      # crapi-chatbot isn't part of this compose file (see header comment),
-      # but nginx.conf.template's /chatbot/ location block does
-      # `proxy_pass ${HTTP_PROTOCOL}://${CHATBOT_SERVICE}` unconditionally,
-      # and nginx resolves that upstream hostname at boot (not lazily) — an
-      # empty value fails config validation, and a nonexistent hostname
-      # fails DNS resolution, either way crapi-web won't start at all.
-      # Pointing it at an existing, always-up service keeps nginx happy;
-      # the /chatbot/ route just proxies into crapi-identity if ever hit,
-      # which is fine since nothing in this project's test scope uses it.
+      # crapi-chatbot is excluded from this stack. nginx resolves the
+      # /chatbot/ upstream at boot, so it must point at a reachable service
+      # or crapi-web fails to start; crapi-identity is a harmless stand-in.
       - CHATBOT_SERVICE=crapi-identity:${IDENTITY_SERVER_PORT:-8080}
       - MAILHOG_WEB_SERVICE=mailhog:8025
       - TLS_ENABLED=${TLS_ENABLED:-false}

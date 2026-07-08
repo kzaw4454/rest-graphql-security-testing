@@ -29,7 +29,7 @@ class VulnerabilityResult:
     Standardised result of a single vulnerability test run.
 
     Fields map to what src/analysis/ needs for comparative statistics
-    and OWASP mapping (see CLAUDE.md, §3.4/§3.5 of the proposal).
+    and OWASP mapping across REST and GraphQL targets.
     """
 
     test_name: str

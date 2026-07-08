@@ -1,22 +1,13 @@
 """
-SQL/NoSQL injection tests, covering both REST targets.
+SQL/NoSQL injection tests.
 
-VAmPI: `SQLiUserLookupTest` reseeds via /createdb at the start of run(), so
-repeated runs don't accumulate state (see CLAUDE.md, State Management Per
-Target).
+VAmPI: `SQLiUserLookupTest` reseeds via /createdb at the start of run().
 
-crAPI: `NoSQLiCouponValidateTest` and `SQLiApplyCouponTest` have no such
-reseed available — crAPI ships nothing equivalent to /createdb, and its
-postgresdb/mongodb volumes persist across container restarts. Each run
-signs up a fresh synthetic identity (crAPI enforces unique email *and*
-phone number per account) rather than reusing config's static test_users
-values, which would 403 ("already registered") on a second run. Separately,
-`SQLiApplyCouponTest`'s tautology sub-test creates one row in crAPI's
-`applied_coupon` table per run as a deliberate setup step (see its
-docstring) — this is a known, accepted limitation of testing against a
-target with no reset endpoint, not a bug: the table grows monotonically
-across repeated runs of this module unless the postgresdb volume is
-dropped between them.
+crAPI: `NoSQLiCouponValidateTest` and `SQLiApplyCouponTest` run signs up 
+a fresh synthetic identity (no reseeding). 
+
+`SQLiApplyCouponTest`'s sub-test adds one row to crAPI's `applied_coupon` 
+table per run as a setup step.
 """
 
 from __future__ import annotations
@@ -339,42 +330,16 @@ class NoSQLiCouponValidateTest(VulnerabilityTest):
     Confirms NoSQL injection in crAPI's
     `POST /community/api/v2/coupon/validate-coupon`.
 
-    crapi-community (services/community/api/controllers/coupon_controller.go
-    ::ValidateCoupon) unmarshals the raw request body directly into a
-    MongoDB bson.M filter with no shape validation, then passes it
-    unmodified to FindOne() — so a Mongo query operator in the request body
-    (e.g. {"coupon_code": {"$ne": 1}}) is honoured as query logic instead of
-    being treated as a literal value to match. This is crAPI's own
-    documented "Challenge 12": get a free coupon without ever knowing a
-    real coupon code.
+    crapi-community unmarshals the raw request body directly into a MongoDB
+    bson.M filter with no shape validation, so a Mongo query operator in
+    the request body (e.g. {"coupon_code": {"$ne": 1}}) is honoured as
+    query logic instead of a literal value — crAPI's own documented
+    "Challenge 12": a free coupon without ever knowing a real coupon code.
 
-    Detection criteria:
-      - Control: a syntactically-plain, random, nonexistent coupon_code
-        string must fail to match (Mongo's ErrNoDocuments, surfaced as
-        HTTP 500) — confirms the endpoint does not casually match arbitrary
-        literals.
-      - Confirmed: a request whose coupon_code value is itself a JSON
-        object (a Mongo operator, not a string) returns HTTP 200 with a
-        real coupon_code in the body. Since the attacker never supplied a
-        literal matching value, any such 200 is deterministic proof of
-        injection, not a coincidental match — unlike VAmPI's
-        SEEDED_USERNAMES check, no cross-check against a known-seeded
-        coupon list is needed here.
-      - False positive guard: a transport-level failure is treated as
-        inconclusive (passed=True, LOW), not as a finding either way.
-      - Extra retest: the same payload is also sent unauthenticated, to
-        establish whether auth is a compensating control at all before
-        drawing conclusions from the authenticated result (mirrors
-        SQLiUserLookupTest's auth-variant retest, but inverted — crAPI
-        does enforce auth here, unlike VAmPI's sqli_target).
-
-    OWASP category: mapped to "API8:2023 Security Misconfiguration", same
-    as VAmPI's SQLiUserLookupTest — Injection has no dedicated category in
-    the 2023 OWASP API Security Top 10, and reusing the same imperfect
-    mapping keeps injection findings comparable across REST targets for
-    the chi-square-by-category analysis (ProposalReport.docx §3.4). This is
-    an approximation, not a claim that "Security Misconfiguration" is the
-    precise root cause.
+    Mapped to "API8:2023 Security Misconfiguration" (Injection has no
+    dedicated OWASP API category), matching the mapping used for VAmPI's
+    SQLiUserLookupTest so injection findings stay comparable across REST
+    targets (ProposalReport.docx §3.4).
     """
 
     name = "nosqli_coupon_validate"
@@ -539,53 +504,19 @@ class SQLiApplyCouponTest(VulnerabilityTest):
     """
     Confirms SQL injection in crAPI's `POST /workshop/api/shop/apply_coupon`.
 
-    crapi-workshop (services/workshop/crapi/shop/views.py::ApplyCouponView)
-    string-concatenates coupon_code directly into a raw SQL query —
-    `"...WHERE user_id = " + str(user.id) + " AND coupon_code = '" +
-    coupon_code + "'"` — with no parameterisation. Confirmed against source
-    and empirically that this query runs unconditionally on every call,
-    before any check that the coupon exists, so no setup step is needed to
-    reach the injection point itself.
+    crapi-workshop string-concatenates coupon_code directly into a raw SQL
+    query with no parameterisation, run unconditionally on every call
+    before any coupon-existence check. A stacked-query payload
+    (`0'; select version() --+`) leaks a PostgreSQL version banner into the
+    response on a fresh container. A boolean tautology payload
+    (`0' or '0' = '0`) matches every row in the applied_coupon table
+    instead of being scoped to the caller's own rows; the tautology
+    sub-test applies one real coupon as setup so a matching row exists,
+    which permanently adds a row to that table on every run since crAPI
+    has no reset endpoint.
 
-    Detection criteria:
-      - Control: a syntactically-safe, random, nonexistent coupon_code must
-        return HTTP 400 "Coupon not found" (the raw query executes cleanly,
-        finds no rows, falls through to crAPI's own Mongo-backed coupon
-        existence check).
-      - Confirmed (primary, stateless): a stacked-query payload
-        (`0'; select version() --+`) causes the raw query to execute as two
-        statements; PostgreSQL's simple query protocol returns only the
-        last statement's result set, so `select version()`'s output lands
-        in the row the view code treats as an already-claimed coupon_code
-        and echoes back verbatim. Confirmed if the response message
-        contains a PostgreSQL version signature. Works on a completely
-        fresh container — no pre-existing applied_coupon rows required.
-      - Confirmed (secondary, requires setup): a boolean tautology payload
-        (`0' or '0' = '0`) turns `WHERE user_id = X AND coupon_code =
-        '<payload>'` into `WHERE user_id = X AND coupon_code = '' OR
-        '0'='0'` — AND binds tighter than OR, so this matches *every* row
-        in the whole applied_coupon table, not just this user's own rows.
-        Only observable if at least one such row exists; this test creates
-        one itself (see _discover_and_apply_real_coupon), discovering a
-        valid coupon via the same $ne operator NoSQLiCouponValidateTest
-        uses rather than depending on a hardcoded coupon code or on that
-        other test class having run first. Confirmed if the "already
-        claimed" response names the coupon_code applied in setup, despite
-        a different literal having actually been sent as coupon_code.
-      - False positive guard: transport failures and setup/discovery
-        failures are treated as inconclusive, not findings either way.
-      - Extra retest: the stacked-query payload is also sent
-        unauthenticated (see _test_unauthenticated_rejected), same
-        rationale as NoSQLiCouponValidateTest's auth-variant retest.
-
-    Known limitation: the tautology sub-test's setup step applies one real
-    coupon to a fresh synthetic account, permanently adding one row to
-    crAPI's applied_coupon table (see module docstring) — accumulates
-    across every run of this module since crAPI has no reset endpoint.
-    Not a bug, just a property of testing against this target.
-
-    OWASP category: "API8:2023 Security Misconfiguration", same rationale
-    as NoSQLiCouponValidateTest and VAmPI's SQLiUserLookupTest.
+    Mapped to "API8:2023 Security Misconfiguration", same rationale as
+    NoSQLiCouponValidateTest.
     """
 
     name = "sqli_apply_coupon"
@@ -743,13 +674,11 @@ class SQLiApplyCouponTest(VulnerabilityTest):
         """Setup step for _test_tautology.
 
         Discovers a currently-valid coupon code via the same $ne operator
-        NoSQLiCouponValidateTest uses (not a hardcoded value, and not a
-        dependency on that test class having actually run), then
-        legitimately applies it to the attacker account so at least one row
-        exists in applied_coupon for the tautology payload to match
-        against. Returns the applied coupon_code, or None if discovery or
-        application failed — the tautology test is then skipped as
-        inconclusive rather than crashing the whole run().
+        NoSQLiCouponValidateTest uses, then applies it to the attacker
+        account so a row exists in applied_coupon for the tautology
+        payload to match. Returns the applied coupon_code, or None if
+        discovery/application failed (the tautology test is then skipped
+        as inconclusive).
         """
         try:
             discover_resp = self.client.validate_coupon(

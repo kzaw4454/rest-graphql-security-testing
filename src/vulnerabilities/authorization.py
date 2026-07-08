@@ -1,32 +1,5 @@
 """
-Broken Object Level Authorization (BOLA / OWASP API1:2023) tests, covering
-two REST targets.
-
-API1:2023 is the OWASP API Security Top 10 category for APIs that expose
-object identifiers without verifying that the requesting user actually owns
-the referenced object. It is consistently ranked as the most prevalent API
-vulnerability in industry surveys (see ProposalReport.docx §2).
-
-VAmPI: `BOLABookAccessTest` targets a book title as the object identifier.
-VAmPI's own OpenAPI spec documents `GET /books/v1/{book_title}` as "Only the
-owner may retrieve it" while the running container (vulnerable=1) does not
-actually enforce that check — any authenticated user's token can retrieve
-another user's secret.
-
-Juice Shop: `BOLABasketAccessTest` targets a basket id as the object
-identifier. Confirmed empirically against a live bkimminich/juice-shop
-container that `GET /rest/basket/{id}` enforces authentication (an
-unauthenticated request 401s) but not ownership — any authenticated user's
-own valid token can retrieve another user's basket contents by raw
-sequential integer id. Unlike VAmPI's book secret, no setup call is needed
-to create the object: the basket id is returned directly in Juice Shop's
-own login response (`authentication.bid`), so `JuiceShopClient.login()`
-captures it for free (see src/utils/juiceshop_client.py).
-
-Both tests reproduce their finding via the common VulnerabilityResult
-schema so results are comparable across REST targets, and against the
-equivalent GraphQL BOLA tests run against DVGA (see CLAUDE.md, §3.4/§3.5
-methodology).
+Broken Object Level Authorization (BOLA / OWASP API1:2023) tests.
 """
 
 from __future__ import annotations
@@ -47,12 +20,6 @@ BOOKS_PATH = "/books/v1"
 class BOLABookAccessTest(VulnerabilityTest):
     """
     Confirms whether VAmPI enforces object-level ownership on book secrets.
-
-    Scenario: two independent users each create a book with a private
-    `secret`. A confirmed BOLA exists if either user's own valid token can
-    retrieve the *other* user's secret via `GET /books/v1/{book_title}` —
-    the endpoint only checks that a token is valid, not that its owner
-    matches the book's owner.
     """
 
     name = "bola_book_secret_access"
@@ -180,12 +147,6 @@ class BOLABookAccessTest(VulnerabilityTest):
 
 def _fresh_synthetic_juiceshop_login(client: JuiceShopClient, role: str) -> None:
     """Sign up and log in a brand-new synthetic identity for `role`.
-
-    Juice Shop has no reseed endpoint reachable mid-session and confirmed
-    empirically that a duplicate email 400s ("email must be unique") — see
-    src/utils/juiceshop_client.py's module docstring. Each test run needs
-    its own fresh identity rather than reusing config's static test_users
-    values, mirroring injection.py's `_fresh_synthetic_login` for crAPI.
     """
     user = client.test_users[role]
     suffix = uuid.uuid4().hex[:10]
@@ -197,15 +158,6 @@ def _fresh_synthetic_juiceshop_login(client: JuiceShopClient, role: str) -> None
 class BOLABasketAccessTest(VulnerabilityTest):
     """
     Confirms whether Juice Shop enforces object-level ownership on baskets.
-
-    Scenario: two independent users each log in, and Juice Shop's own login
-    response hands back each user's basket id directly
-    (`authentication.bid`) — unlike VAmPI's book secret, no setup call is
-    needed to create the object under test. A confirmed BOLA exists if
-    either user's own valid token can retrieve the *other* user's basket
-    contents via `GET /rest/basket/{id}` — confirmed empirically that the
-    endpoint only checks that a token is valid, not that its owner matches
-    the basket's owner (see module docstring).
     """
 
     name = "bola_basket_access"
@@ -263,11 +215,6 @@ class BOLABasketAccessTest(VulnerabilityTest):
         )
 
     def _test_unauthenticated_access(self, owner_bid: int) -> VulnerabilityResult:
-        """Control case: same object, no token at all. Confirmed empirically
-        that Juice Shop rejects this with HTTP 401 — documents that
-        authentication itself *is* enforced here, only ownership is not
-        (mirrors `BOLABookAccessTest._test_unauthenticated_access`).
-        """
         resp = self.client.get_basket(owner_bid, as_user=None)
         leaked = self._response_reveals_basket(resp, owner_bid)
 
