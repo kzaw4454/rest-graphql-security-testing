@@ -248,6 +248,6 @@ vulnerable_apps/**/*.db
 vulnerable_apps/**/*.sqlite3
 
 # Personal notes
-zmynotes.txt
+znotes/
 
 src2/

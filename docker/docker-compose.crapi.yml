@@ -1,18 +1,3 @@
-# crAPI (Completely Ridiculous API) — REST target, multi-service.
-#
-# Sourced from OWASP/crAPI's own deploy/docker/docker-compose.yml (prebuilt
-# Docker Hub images — no need to clone/build the crAPI repo), trimmed of:
-#   - crapi-chatbot + chromadb: needs an OpenAI-compatible key we don't have,
-#     and is unrelated to the SQL/NoSQL injection work this file supports.
-#   - api.mypremiumdealership.com: SSRF-challenge placeholder, out of scope.
-# TLS_ENABLED intentionally left at its compose-file default (false) rather
-# than the upstream .env's true, matching VAmPI's plain-http setup.
-#
-# Confirmed against OWASP/crAPI source (services/identity/entrypoint.sh):
-# crapi-identity falls back to its own baked-in default JWKS key if
-# ./keys/jwks.json is absent, so the keys/ directory here is intentionally
-# left empty — no key material needs to be generated or copied.
-
 name: crapi
 
 services:

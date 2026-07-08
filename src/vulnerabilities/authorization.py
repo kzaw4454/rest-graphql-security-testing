@@ -1,17 +1,32 @@
 """
-Broken Object Level Authorization (BOLA / OWASP API1:2023) tests against VAmPI.
+Broken Object Level Authorization (BOLA / OWASP API1:2023) tests, covering
+two REST targets.
 
 API1:2023 is the OWASP API Security Top 10 category for APIs that expose
-object identifiers (here, a book title) without verifying that the
-requesting user actually owns the referenced object. It is consistently
-ranked as the most prevalent API vulnerability in industry surveys (see
-ProposalReport.docx §2), and VAmPI's own OpenAPI spec documents
-`GET /books/v1/{book_title}` as "Only the owner may retrieve it" while the
-running container (vulnerable=1) does not actually enforce that check —
-any authenticated user's token can retrieve another user's secret. This
-module reproduces that finding so it is comparable, via the common
-VulnerabilityResult schema, against the equivalent GraphQL BOLA tests run
-against DVGA (see CLAUDE.md, §3.4/§3.5 methodology).
+object identifiers without verifying that the requesting user actually owns
+the referenced object. It is consistently ranked as the most prevalent API
+vulnerability in industry surveys (see ProposalReport.docx §2).
+
+VAmPI: `BOLABookAccessTest` targets a book title as the object identifier.
+VAmPI's own OpenAPI spec documents `GET /books/v1/{book_title}` as "Only the
+owner may retrieve it" while the running container (vulnerable=1) does not
+actually enforce that check — any authenticated user's token can retrieve
+another user's secret.
+
+Juice Shop: `BOLABasketAccessTest` targets a basket id as the object
+identifier. Confirmed empirically against a live bkimminich/juice-shop
+container that `GET /rest/basket/{id}` enforces authentication (an
+unauthenticated request 401s) but not ownership — any authenticated user's
+own valid token can retrieve another user's basket contents by raw
+sequential integer id. Unlike VAmPI's book secret, no setup call is needed
+to create the object: the basket id is returned directly in Juice Shop's
+own login response (`authentication.bid`), so `JuiceShopClient.login()`
+captures it for free (see src/utils/juiceshop_client.py).
+
+Both tests reproduce their finding via the common VulnerabilityResult
+schema so results are comparable across REST targets, and against the
+equivalent GraphQL BOLA tests run against DVGA (see CLAUDE.md, §3.4/§3.5
+methodology).
 """
 
 from __future__ import annotations
@@ -20,6 +35,7 @@ import logging
 import uuid
 from typing import Any
 
+from src.utils.juiceshop_client import JuiceShopClient
 from src.utils.vampi_client import VAmPIClient
 from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
 
@@ -162,16 +178,167 @@ class BOLABookAccessTest(VulnerabilityTest):
         return body.get("secret") == expected_secret
 
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+def _fresh_synthetic_juiceshop_login(client: JuiceShopClient, role: str) -> None:
+    """Sign up and log in a brand-new synthetic identity for `role`.
 
-    client = VAmPIClient.from_config("config/vampi.yaml")
-    test = BOLABookAccessTest(architecture="rest", target="vampi", client=client)
+    Juice Shop has no reseed endpoint reachable mid-session and confirmed
+    empirically that a duplicate email 400s ("email must be unique") — see
+    src/utils/juiceshop_client.py's module docstring. Each test run needs
+    its own fresh identity rather than reusing config's static test_users
+    values, mirroring injection.py's `_fresh_synthetic_login` for crAPI.
+    """
+    user = client.test_users[role]
+    suffix = uuid.uuid4().hex[:10]
+    user["email"] = f"{role}.{suffix}@juiceshop-test.local"
+    client.register(role)
+    client.login(role)
 
-    for result in test.run():
+
+class BOLABasketAccessTest(VulnerabilityTest):
+    """
+    Confirms whether Juice Shop enforces object-level ownership on baskets.
+
+    Scenario: two independent users each log in, and Juice Shop's own login
+    response hands back each user's basket id directly
+    (`authentication.bid`) — unlike VAmPI's book secret, no setup call is
+    needed to create the object under test. A confirmed BOLA exists if
+    either user's own valid token can retrieve the *other* user's basket
+    contents via `GET /rest/basket/{id}` — confirmed empirically that the
+    endpoint only checks that a token is valid, not that its owner matches
+    the basket's owner (see module docstring).
+    """
+
+    name = "bola_basket_access"
+    owasp_category = "API1:2023 Broken Object Level Authorization"
+
+    def __init__(self, architecture: str, target: str, client: JuiceShopClient) -> None:
+        super().__init__(architecture, target)
+        self.client = client
+
+    def run(self) -> list[VulnerabilityResult]:
+        for role in ("victim", "attacker"):
+            _fresh_synthetic_juiceshop_login(self.client, role)
+
+        victim_bid = self.client.basket_id_for("victim")
+        attacker_bid = self.client.basket_id_for("attacker")
+
+        return [
+            self._test_cross_user_access(
+                owner_role="victim", owner_bid=victim_bid, requester_role="attacker"
+            ),
+            self._test_cross_user_access(
+                owner_role="attacker", owner_bid=attacker_bid, requester_role="victim"
+            ),
+            self._test_unauthenticated_access(owner_bid=victim_bid),
+        ]
+
+    def _test_cross_user_access(
+        self, owner_role: str, owner_bid: int, requester_role: str
+    ) -> VulnerabilityResult:
+        """One basket, one owner, one *other* authenticated user's token."""
+        resp = self.client.get_basket(owner_bid, as_user=requester_role)
+        leaked = self._response_reveals_basket(resp, owner_bid)
+
+        passed = not leaked
+        severity = Severity.HIGH if leaked else Severity.LOW
+        evidence = (
+            f"Basket {owner_bid} owned by '{owner_role}' was "
+            f"{'successfully retrieved' if leaked else 'not retrieved'} "
+            f"using '{requester_role}''s own valid token "
+            f"(HTTP {resp.status_code})."
+        )
+        if leaked:
+            evidence += " Response contained the owner's basket contents, confirming BOLA."
+
+        path = self.client.endpoints.get("basket", "/rest/basket/{id}").format(id=owner_bid)
+        return self._result(
+            passed=passed,
+            severity=severity,
+            evidence=evidence,
+            request_summary=f"GET {path} as_user='{requester_role}'",
+            response_summary=f"HTTP {resp.status_code}; basket_leaked={leaked}",
+            owner_role=owner_role,
+            requester_role=requester_role,
+            basket_id=owner_bid,
+        )
+
+    def _test_unauthenticated_access(self, owner_bid: int) -> VulnerabilityResult:
+        """Control case: same object, no token at all. Confirmed empirically
+        that Juice Shop rejects this with HTTP 401 — documents that
+        authentication itself *is* enforced here, only ownership is not
+        (mirrors `BOLABookAccessTest._test_unauthenticated_access`).
+        """
+        resp = self.client.get_basket(owner_bid, as_user=None)
+        leaked = self._response_reveals_basket(resp, owner_bid)
+
+        passed = not leaked
+        severity = Severity.CRITICAL if leaked else Severity.LOW
+        evidence = (
+            f"Unauthenticated request for basket {owner_bid} "
+            f"{'succeeded' if leaked else 'was denied'} "
+            f"(HTTP {resp.status_code})."
+        )
+
+        path = self.client.endpoints.get("basket", "/rest/basket/{id}").format(id=owner_bid)
+        return self._result(
+            passed=passed,
+            severity=severity,
+            evidence=evidence,
+            request_summary=f"GET {path} as_user=None",
+            response_summary=f"HTTP {resp.status_code}; basket_leaked={leaked}",
+            owner_role="victim",
+            requester_role="unauthenticated",
+            basket_id=owner_bid,
+        )
+
+    @staticmethod
+    def _response_reveals_basket(resp: Any, expected_bid: int) -> bool:
+        if resp.status_code != 200:
+            return False
+        try:
+            body = resp.json()
+        except ValueError:
+            return False
+        return body.get("data", {}).get("id") == expected_bid
+
+
+def _print_results(results: list[VulnerabilityResult]) -> None:
+    for result in results:
         status = "PASS" if result.passed else f"FAIL ({result.severity.value.upper()})"
         print(f"[{status}] {result.test_name} - {result.owasp_category}")
         print(f"  Evidence:  {result.evidence}")
         print(f"  Request:   {result.request_summary}")
         print(f"  Response:  {result.response_summary}")
         print()
+
+
+if __name__ == "__main__":
+    import argparse
+
+    logging.basicConfig(level=logging.INFO)
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--target",
+        choices=["vampi", "juiceshop", "all"],
+        default="all",
+        help=(
+            "Which target's container must be up. Default 'all' requires both "
+            "docker-compose.vampi.yml and docker-compose.juiceshop.yml to be running "
+            "— pass --target to run just one."
+        ),
+    )
+    args = parser.parse_args()
+
+    if args.target in ("vampi", "all"):
+        vampi_client = VAmPIClient.from_config("config/vampi.yaml")
+        _print_results(
+            BOLABookAccessTest(architecture="rest", target="vampi", client=vampi_client).run()
+        )
+    if args.target in ("juiceshop", "all"):
+        juiceshop_client = JuiceShopClient.from_config("config/juiceshop.yaml")
+        _print_results(
+            BOLABasketAccessTest(
+                architecture="rest", target="juiceshop", client=juiceshop_client
+            ).run()
+        )

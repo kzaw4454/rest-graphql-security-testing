@@ -1,12 +1,10 @@
 """
 Common interface for vulnerability test modules.
 
-Per CLAUDE.md: "Each vulnerability module implements a common `test_*`
-interface so results are comparable across REST and GraphQL scanners."
-
-This file defines that shared contract only — it contains no test logic
-for any specific vulnerability. Concrete modules (e.g. authorization.py,
-injection.py) subclass VulnerabilityTest and implement `run()`.
+- Shared contract only
+- No test logic
+- Concrete modules (e.g. authorization.py, injection.py) 
+  subclass VulnerabilityTest and implement `run()`.
 """
 
 from __future__ import annotations

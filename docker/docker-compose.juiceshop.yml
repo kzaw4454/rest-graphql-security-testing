@@ -1,0 +1,12 @@
+services:
+  juiceshop:
+    image: bkimminich/juice-shop:latest
+    container_name: juiceshop
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - juiceshop-net
+
+networks:
+  juiceshop-net:
+    driver: bridge
