@@ -1,0 +1,14 @@
+services:
+  dvga:
+    image: dolevf/dvga:latest
+    container_name: dvga
+    ports:
+      - "127.0.0.1:5013:5013"
+    environment:
+      - WEB_HOST=0.0.0.0
+    networks:
+      - dvga-net
+
+networks:
+  dvga-net:
+    driver: bridge
