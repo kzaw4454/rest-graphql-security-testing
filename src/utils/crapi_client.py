@@ -1,17 +1,5 @@
 """
 crAPI-specific REST API client.
-
-Extends RESTAPIClient with crAPI's exact auth flow and endpoint shapes:
-signup/login payloads of {name, email, password, number} (email-based login,
-not username like VAmPI's), the `token` field name in login responses, and
-the coupon validate/apply endpoints used by the NoSQL/SQL injection tests.
-
-crAPI has no single reseed endpoint (see CLAUDE.md, State Management Per
-Target) — the coupons collection is seeded once by crapi-community on first
-boot and persists in the mongodb-data volume across runs, and there is no
-equivalent of VAmPI's /createdb. Tests that need a guaranteed applied_coupon
-row (see SQLiApplyCouponTest) create it themselves via apply_coupon() rather
-than relying on leftover state from a previous run.
 """
 
 from __future__ import annotations
@@ -27,22 +15,15 @@ logger = logging.getLogger(__name__)
 
 
 class CrAPIClient(RESTAPIClient):
-    """RESTAPIClient subclass wired to crAPI's auth flow and coupon endpoints."""
+    """RESTAPIClient subclass for crAPI's auth flow and coupon endpoints."""
 
     @property
     def scan_config(self) -> dict[str, Any]:
-        """The config file's `scan:` section — see VAmPIClient.scan_config
-        for why vulnerability modules read scan scope through here rather
-        than the client's private config dict."""
         return self._config.get("scan", {})
 
     def signup(self, role: str) -> requests.Response:
-        """Register a test user identified by role (e.g. 'attacker', 'victim').
-
-        crAPI's SignUpForm requires all four fields (name, email, password,
-        number) — confirmed against services/identity/src/main/java/com/crapi
-        /model/SignUpForm.java (@NotBlank on all of them) and empirically
-        against the live container.
+        """
+        Register a test user identified by role
         """
         user = self._require_user(role)
         path = self.endpoints.get("signup", "/identity/api/auth/signup")
@@ -57,10 +38,8 @@ class CrAPIClient(RESTAPIClient):
         return resp
 
     def login(self, role: str) -> str:
-        """Log in a test user and store their token for later requests.
-
-        Unlike VAmPI's `auth_token` field, crAPI's login response uses
-        `token` (confirmed empirically: {"token": ..., "type": "Bearer", ...}).
+        """
+        Log in a test user and store their token for later requests.
         """
         user = self._require_user(role)
         path = self.endpoints.get("login", "/identity/api/auth/login")
@@ -80,13 +59,8 @@ class CrAPIClient(RESTAPIClient):
     def validate_coupon(
         self, body: dict[str, Any], as_user: Optional[str]
     ) -> requests.Response:
-        """POST to the NoSQL-injectable validate-coupon endpoint.
-
-        `body` is passed through as the raw JSON payload — the vulnerability
-        under test is that crapi-community unmarshals this body directly
-        into a MongoDB filter document (bson.M) with no shape validation,
-        so callers may pass either a plain string coupon_code or a Mongo
-        operator object (e.g. {"coupon_code": {"$ne": 1}}).
+        """
+        POST to the NoSQL-injectable validate-coupon endpoint.
         """
         path = self.endpoints.get(
             "validate_coupon", "/community/api/v2/coupon/validate-coupon"
@@ -102,12 +76,8 @@ class CrAPIClient(RESTAPIClient):
     def apply_coupon(
         self, coupon_code: str, amount: int, as_user: Optional[str]
     ) -> requests.Response:
-        """POST to the SQL-injectable apply_coupon endpoint.
-
-        `coupon_code` is passed through raw — the vulnerability under test
-        is that crapi-workshop string-concatenates it directly into a raw
-        SQL query with no parameterisation, before any check that the
-        coupon exists.
+        """P
+        OST to the SQL-injectable apply_coupon endpoint.
         """
         path = self.endpoints.get("apply_coupon", "/workshop/api/shop/apply_coupon")
         resp = self.session.post(

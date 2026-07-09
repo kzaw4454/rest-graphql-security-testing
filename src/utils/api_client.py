@@ -2,7 +2,7 @@
 Generic REST API client base for interacting with vulnerable test targets.
 
 Reads target configuration from config/*.yaml rather than hardcoding it in
-source, per project convention (see CLAUDE.md).
+source.
 
 This module handles connection/auth transport mechanics only. It does not
 contain any target-specific behavior (payload shapes, auth flows, seed
@@ -29,15 +29,9 @@ class ConfigError(Exception):
 
 class RESTAPIClient:
     """
-    Thin wrapper around `requests` for a single REST target, driven by a
-    YAML config file (e.g. config/vampi.yaml).
-
-    Target-specific subclasses add auth flows and endpoint-specific methods
-    (see VAmPIClient in src/utils/vampi_client.py).
-
     Usage:
-        client = SomeTargetClient.from_config("config/some_target.yaml")
-        resp = client.get("/some/path", as_user="attacker")
+    client = SomeTargetClient.from_config("config/some_target.yaml")
+    resp = client.get("/some/path", as_user="attacker")
     """
 
     def __init__(self, config: dict[str, Any]) -> None:
