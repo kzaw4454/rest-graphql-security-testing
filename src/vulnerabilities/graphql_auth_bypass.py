@@ -1,46 +1,5 @@
 """
 GraphQL Authorization Bypass tests (DVGA).
-
-Covers DVGA's three documented Authorization Bypass scenarios:
-
-- JWTTokenForgeTest: the `me` query trusts an unverified JWT's `identity`
-  claim, letting a caller read any other user's record without ever
-  authenticating as them.
-- GraphiQLInterfaceProtectionBypassTest: query execution through the
-  GraphiQL route is gated only by a client-supplied cookie, not a
-  server-side session check. The gate is enforced by a resolver-level
-  middleware that only runs once a query is actually submitted — a bare
-  page load never triggers it either way, so the test always sends a
-  minimal probe query (`{ __typename }`) rather than just requesting the
-  route.
-- QueryDenyListBypassTest: a restricted query is blocked by an exact-string
-  match on the raw query text, defeated by wrapping the same field in an
-  allow-listed operation name.
-
-State DVGA carries across requests:
-
-- Difficulty (easy/hard) is a single DB-persisted flag shared by every
-  client hitting the container — not per-session, not reset between
-  requests. QueryDenyListBypassTest needs hard mode (in easy mode the
-  restricted field is reachable directly, so the control-vs-bypass
-  contrast wouldn't be meaningful); GraphiQLInterfaceProtectionBypassTest
-  needs easy/non-hard mode (hard mode disables the GraphiQL route
-  outright, cookie or not, which would mask the cookie-trust bug rather
-  than demonstrate it). Both tests call `set_difficulty()` themselves at
-  the top of `run()` rather than assuming a fresh container's default, so
-  each is self-contained regardless of what a previous run left behind.
-  `_run_dvga()` also resets difficulty to easy (DVGA's documented
-  default) after all three tests complete, so the container is left in a
-  known baseline state for anything that runs against it next.
-- DVGA's operation-name allow list (enforced in hard mode only) does not
-  include "Login"/"Me", so config/dvga.yaml sends the login/me documents
-  as anonymous operations rather than named ones — anonymous operations
-  are exempt from that check by DVGA's own source. This keeps
-  JWTTokenForgeTest's login step working in either difficulty mode.
-- Neither `me` (read-only lookup) nor `login` (reuses the seeded
-  `operator` account) writes any new data, so unlike VAmPI/crAPI/Juice
-  Shop there is no accumulating test data to reseed or randomize between
-  runs for this module.
 """
 
 from __future__ import annotations
@@ -159,11 +118,7 @@ class GraphiQLInterfaceProtectionBypassTest(VulnerabilityTest):
     PROBE_QUERY = "{ __typename }"
 
     def run(self) -> list[VulnerabilityResult]:
-        # The cookie check is only reachable at all when difficulty isn't
-        # hard (hard mode disables GraphiQL unconditionally, cookie or not
-        # — see module docstring) and DVGA persists difficulty in its own
-        # database across requests, so this can't assume a fresh container's
-        # default and must set it explicitly.
+
         self.client.set_difficulty("easy")
         self.client.prime_graphiql_cookie()
         return [
@@ -311,12 +266,8 @@ def _print_results(results: list[VulnerabilityResult]) -> None:
 
 
 def _wait_for_dvga(client: DVGAClient, timeout: float = 30.0, interval: float = 2.0) -> None:
-    """Poll the container until it accepts connections.
-
-    DVGA's compose file has no healthcheck (single-container pattern, same
-    as vampi/juiceshop), and its Flask/gevent server can take a few seconds
-    to bind after `docker compose up` — connection-refused errors right
-    after container start are startup lag, not a real failure.
+    """
+    Poll the container until it accepts connections.
     """
     import time
 
@@ -348,13 +299,6 @@ def _run_dvga() -> None:
             architecture="graphql", target="dvga", client=dvga_client
         ).run()
     )
-
-    # Difficulty is shared, DB-persisted server state (see module
-    # docstring) — restore DVGA's documented default so a subsequent run
-    # (this module's own, a future DVGA module, manual exploration, or a
-    # benchmark tool run against the same container per CLAUDE.md's
-    # Benchmarks section) starts from a known baseline rather than
-    # inheriting whatever mode the last test here happened to need.
     dvga_client.set_difficulty("easy")
 
 

@@ -1,9 +1,5 @@
 """
 VAmPI-specific REST API client.
-
-Extends RESTAPIClient with VAmPI's exact auth flow and endpoint shapes:
-register/login payloads of {username, password, email}, the auth_token
-field name in login responses, and the /createdb reseed endpoint.
 """
 
 from __future__ import annotations
@@ -23,14 +19,10 @@ class VAmPIClient(RESTAPIClient):
 
     @property
     def scan_config(self) -> dict[str, Any]:
-        """The config file's `scan:` section (e.g. sqli_payloads) — RESTAPIClient
-        only parses `target`/`auth`/`test_users`, so vulnerability modules that
-        need config-driven scan scope read it through here rather than
-        reaching into the client's private config dict directly."""
         return self._config.get("scan", {})
 
     def seed_database(self) -> requests.Response:
-        """Hit the createdb endpoint to (re)populate dummy data."""
+        """Populate creatdb endpoint with dummy data."""
         path = self.endpoints.get("createdb", "/createdb")
         resp = self.session.get(self._url(path), timeout=self.timeout)
         logger.info("Seed DB: %s -> %s", path, resp.status_code)

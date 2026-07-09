@@ -27,9 +27,6 @@ class Severity(str, Enum):
 class VulnerabilityResult:
     """
     Standardised result of a single vulnerability test run.
-
-    Fields map to what src/analysis/ needs for comparative statistics
-    and OWASP mapping across REST and GraphQL targets.
     """
 
     test_name: str
@@ -53,11 +50,7 @@ class VulnerabilityResult:
 
 class VulnerabilityTest(ABC):
     """
-    Base class all vulnerability test modules implement.
-
-    Subclasses must set `name` and `owasp_category`, and implement `run()`
-    to return a list of VulnerabilityResult (one test can produce multiple
-    results, e.g. testing several endpoints for the same category).
+    Base class for all vulnerability test modules.
     """
 
     name: str = "unnamed_test"
@@ -81,7 +74,7 @@ class VulnerabilityTest(ABC):
         response_summary: Optional[str] = None,
         **extra: Any,
     ) -> VulnerabilityResult:
-        """Convenience factory so subclasses don't repeat boilerplate fields."""
+        """Convenience factory for subclasses not to repeat boilerplate fields."""
         return VulnerabilityResult(
             test_name=self.name,
             owasp_category=self.owasp_category,

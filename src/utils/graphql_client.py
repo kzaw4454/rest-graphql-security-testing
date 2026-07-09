@@ -1,23 +1,5 @@
 """
 Generic GraphQL API client base for interacting with vulnerable test targets.
-
-Reads target configuration from config/*.yaml rather than hardcoding it in
-source.
-
-This module handles connection/transport mechanics only: POSTing
-query/mutation documents to a single GraphQL endpoint, variable and header
-handling, and token storage. It does not contain any target-specific
-behavior (auth flows, schema knowledge, difficulty/mode switches) or
-vulnerability test logic — target-specific clients subclass
-GraphQLAPIClient (e.g. src/utils/dvga_client.py), and vulnerability test
-logic lives in src/vulnerabilities/.
-
-Query/mutation documents are sent as raw strings via requests rather than
-through gql's higher-level Client. Several tests against this framework's
-GraphQL targets need to send documents that don't conform to the schema
-(e.g. an operation-name substitution used to defeat a query filter) and
-need the raw HTTP status code and error body back rather than have
-gql's transport layer raise them as exceptions.
 """
 
 from __future__ import annotations
@@ -102,18 +84,6 @@ class GraphQLAPIClient:
         path: Optional[str] = None,
         **kwargs: Any,
     ) -> requests.Response:
-        """
-        POST a raw GraphQL document to the target's endpoint, in the
-        standard {query, variables, operationName} request shape. The
-        document is sent exactly as given so callers testing a filter or
-        deny-list bypass get their exact payload on the wire.
-
-        `path` overrides the target's default endpoint_path — some targets
-        expose more than one route that executes GraphQL documents (e.g. a
-        separate interactive-IDE route with its own access control) and
-        tests need to hit that route specifically, not just the main API
-        endpoint.
-        """
         body: dict[str, Any] = {"query": query}
         if variables is not None:
             body["variables"] = variables
@@ -137,9 +107,7 @@ class GraphQLAPIClient:
 
     def get(self, path: str, as_user: Optional[str] = None, **kwargs: Any) -> requests.Response:
         """
-        Raw GET against the target's base_url, for routes outside the
-        GraphQL transport itself (protection cookies set on page load,
-        HTTP-level mode switches, the GraphiQL IDE route).
+        Raw GET against the target's base_url
         """
         return self.session.get(
             self._url(path), headers=self._headers_for(as_user), timeout=self.timeout, **kwargs

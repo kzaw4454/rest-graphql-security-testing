@@ -58,13 +58,6 @@ class DVGAClient(GraphQLAPIClient):
     def forge_token(self, identity: str) -> str:
         """
         Build a JWT carrying the given `identity` claim.
-
-        DVGA's token decoding (core/helpers.py `get_identity`) calls
-        `jwt.decode(token, options={"verify_signature": False,
-        "verify_exp": False})` — the signature is never checked, so any
-        syntactically valid JWT with the target identity is accepted
-        regardless of what key signs it or whether it has expired. The
-        signing key here is arbitrary for that reason.
         """
         return jwt.encode(
             {"identity": identity}, "unused-arbitrary-signing-key-not-a-real-secret", algorithm="HS256"
@@ -72,8 +65,8 @@ class DVGAClient(GraphQLAPIClient):
 
     def set_difficulty(self, level: str) -> requests.Response:
         """
-        Switch DVGA's runtime difficulty mode (easy/hard). Persisted
-        server-side in DVGA's own database, not a per-request setting.
+        Switch DVGA's runtime difficulty mode (easy/hard). 
+        Persisted server-side in DVGA's own database, not a per-request setting.
         """
         path = self.scan_config.get("difficulty_endpoint", "/difficulty/{level}").format(
             level=level
@@ -93,14 +86,7 @@ class DVGAClient(GraphQLAPIClient):
 
     def set_graphiql_cookie(self, value: str) -> None:
         """
-        Override the GraphiQL protection cookie client-side, the way a
-        browser's devtools cookie editor would.
-
-        Existing same-named cookies are cleared first and the replacement
-        is set with an explicit domain/path matching the server's own
-        Set-Cookie — a bare `cookies.set(name, value)` would otherwise
-        coexist alongside the server-issued cookie instead of replacing
-        it, since they'd carry different domain attributes.
+        Override the GraphiQL protection cookie client-side.
         """
         cookie_name = self.scan_config.get("interface_protection", {}).get(
             "cookie_name", "env"
@@ -113,11 +99,7 @@ class DVGAClient(GraphQLAPIClient):
 
     def graphiql_query(self, query: str, **kwargs: Any) -> requests.Response:
         """
-        Execute a GraphQL document through the `/graphiql` route rather than
-        `/graphql`. The protection cookie is enforced by a resolver-level
-        middleware that only runs during query execution — a plain page
-        load with no query string never triggers field resolution at all,
-        so it can't be used to observe the cookie check either way.
+        Execute a GraphQL document through the `/graphiql`.
         """
         path = self.scan_config.get("interface_protection", {}).get(
             "graphiql_path", "/graphiql"

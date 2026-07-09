@@ -1,14 +1,5 @@
 """
 Generic REST API client base for interacting with vulnerable test targets.
-
-Reads target configuration from config/*.yaml rather than hardcoding it in
-source.
-
-This module handles connection/auth transport mechanics only. It does not
-contain any target-specific behavior (payload shapes, auth flows, seed
-endpoints) or vulnerability test logic — target-specific clients subclass
-RESTAPIClient (e.g. src/utils/vampi_client.py), and vulnerability test logic
-lives in src/vulnerabilities/.
 """
 
 from __future__ import annotations

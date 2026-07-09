@@ -9,6 +9,7 @@ import uuid
 from typing import Any
 
 from src.utils.juiceshop_client import JuiceShopClient
+from src.utils.results_logger import RunLogger
 from src.utils.vampi_client import VAmPIClient
 from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
 
@@ -279,13 +280,17 @@ if __name__ == "__main__":
 
     if args.target in ("vampi", "all"):
         vampi_client = VAmPIClient.from_config("config/vampi.yaml")
-        _print_results(
-            BOLABookAccessTest(architecture="rest", target="vampi", client=vampi_client).run()
-        )
+        with RunLogger("rest", "vampi", "config/vampi.yaml") as run:
+            vampi_results = BOLABookAccessTest(
+                architecture="rest", target="vampi", client=vampi_client
+            ).run()
+            run.log_results(vampi_results)
+        _print_results(vampi_results)
     if args.target in ("juiceshop", "all"):
         juiceshop_client = JuiceShopClient.from_config("config/juiceshop.yaml")
-        _print_results(
-            BOLABasketAccessTest(
+        with RunLogger("rest", "juiceshop", "config/juiceshop.yaml") as run:
+            juiceshop_results = BOLABasketAccessTest(
                 architecture="rest", target="juiceshop", client=juiceshop_client
             ).run()
-        )
+            run.log_results(juiceshop_results)
+        _print_results(juiceshop_results)
