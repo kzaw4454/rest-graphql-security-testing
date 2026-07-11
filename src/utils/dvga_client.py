@@ -44,7 +44,9 @@ class DVGAClient(GraphQLAPIClient):
 
         token = data.get("data", {}).get("login", {}).get("accessToken")
         if not token:
-            raise RuntimeError(f"Login response for '{role}' did not contain a token: {data}")
+            raise RuntimeError(
+                f"Login response for '{role}' did not contain a token: {data}"
+            )
 
         self._tokens[role] = token
         logger.info("Login '%s': token stored", role)
@@ -55,22 +57,56 @@ class DVGAClient(GraphQLAPIClient):
         query = self.operations["me"]
         return self.query(query, variables={"token": token})
 
+    def create_paste(
+        self, title: str, content: str, public: bool = True, burn: bool = False
+    ) -> requests.Response:
+        """Create a paste via the `createPaste` mutation."""
+        mutation = self.operations["create_paste"]
+        return self.mutate(
+            mutation,
+            variables={
+                "title": title,
+                "content": content,
+                "public": public,
+                "burn": burn,
+            },
+        )
+
+    def pastes(
+        self,
+        public: Optional[bool] = None,
+        filter: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> requests.Response:
+        """Call the `pastes` query with an arbitrary `filter` value — literal or a SQL injection payload."""
+        query = self.operations["pastes"]
+        return self.query(
+            query, variables={"public": public, "filter": filter, "limit": limit}
+        )
+
+    def system_debug(self, arg: Optional[str] = None) -> requests.Response:
+        """Call the `systemDebug` query with an arbitrary `arg` value — literal or an OS command injection payload."""
+        query = self.operations["system_debug"]
+        return self.query(query, variables={"arg": arg})
+
     def forge_token(self, identity: str) -> str:
         """
         Build a JWT carrying the given `identity` claim.
         """
         return jwt.encode(
-            {"identity": identity}, "unused-arbitrary-signing-key-not-a-real-secret", algorithm="HS256"
+            {"identity": identity},
+            "unused-arbitrary-signing-key-not-a-real-secret",
+            algorithm="HS256",
         )
 
     def set_difficulty(self, level: str) -> requests.Response:
         """
-        Switch DVGA's runtime difficulty mode (easy/hard). 
+        Switch DVGA's runtime difficulty mode (easy/hard).
         Persisted server-side in DVGA's own database, not a per-request setting.
         """
-        path = self.scan_config.get("difficulty_endpoint", "/difficulty/{level}").format(
-            level=level
-        )
+        path = self.scan_config.get(
+            "difficulty_endpoint", "/difficulty/{level}"
+        ).format(level=level)
         return self.get(path)
 
     def graphiql_cookie(self) -> Optional[str]:
@@ -109,5 +145,7 @@ class DVGAClient(GraphQLAPIClient):
     def _require_user(self, role: str) -> dict[str, str]:
         user = self.test_users.get(role)
         if not user:
-            raise ConfigError(f"No test user configured for role '{role}' in config file")
+            raise ConfigError(
+                f"No test user configured for role '{role}' in config file"
+            )
         return user

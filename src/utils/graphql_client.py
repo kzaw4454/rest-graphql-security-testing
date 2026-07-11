@@ -105,10 +105,36 @@ class GraphQLAPIClient:
     def mutate(self, mutation: str, **kwargs: Any) -> requests.Response:
         return self.execute(mutation, **kwargs)
 
-    def get(self, path: str, as_user: Optional[str] = None, **kwargs: Any) -> requests.Response:
+    def execute_batch(
+        self,
+        queries: list[str],
+        as_user: Optional[str] = None,
+        path: Optional[str] = None,
+    ) -> requests.Response:
+        """
+        Send multiple query/mutation documents as a single batched HTTP
+        request (a JSON array body), rather than the single-object body
+        `execute()` sends. Targets are expected to either enforce a batch
+        size limit or execute the whole array unconditionally.
+        """
+        body = [{"query": q} for q in queries]
+        url = f"{self.base_url}{path}" if path is not None else self.endpoint_url
+        return self.session.post(
+            url,
+            json=body,
+            headers=self._headers_for(as_user),
+            timeout=self.timeout,
+        )
+
+    def get(
+        self, path: str, as_user: Optional[str] = None, **kwargs: Any
+    ) -> requests.Response:
         """
         Raw GET against the target's base_url
         """
         return self.session.get(
-            self._url(path), headers=self._headers_for(as_user), timeout=self.timeout, **kwargs
+            self._url(path),
+            headers=self._headers_for(as_user),
+            timeout=self.timeout,
+            **kwargs,
         )

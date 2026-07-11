@@ -147,8 +147,7 @@ class BOLABookAccessTest(VulnerabilityTest):
 
 
 def _fresh_synthetic_juiceshop_login(client: JuiceShopClient, role: str) -> None:
-    """Sign up and log in a brand-new synthetic identity for `role`.
-    """
+    """Sign up and log in a brand-new synthetic identity for `role`."""
     user = client.test_users[role]
     suffix = uuid.uuid4().hex[:10]
     user["email"] = f"{role}.{suffix}@juiceshop-test.local"
@@ -201,9 +200,13 @@ class BOLABasketAccessTest(VulnerabilityTest):
             f"(HTTP {resp.status_code})."
         )
         if leaked:
-            evidence += " Response contained the owner's basket contents, confirming BOLA."
+            evidence += (
+                " Response contained the owner's basket contents, confirming BOLA."
+            )
 
-        path = self.client.endpoints.get("basket", "/rest/basket/{id}").format(id=owner_bid)
+        path = self.client.endpoints.get("basket", "/rest/basket/{id}").format(
+            id=owner_bid
+        )
         return self._result(
             passed=passed,
             severity=severity,
@@ -227,7 +230,9 @@ class BOLABasketAccessTest(VulnerabilityTest):
             f"(HTTP {resp.status_code})."
         )
 
-        path = self.client.endpoints.get("basket", "/rest/basket/{id}").format(id=owner_bid)
+        path = self.client.endpoints.get("basket", "/rest/basket/{id}").format(
+            id=owner_bid
+        )
         return self._result(
             passed=passed,
             severity=severity,

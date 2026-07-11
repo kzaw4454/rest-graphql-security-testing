@@ -3,7 +3,7 @@ Common interface for vulnerability test modules.
 
 - Shared contract only
 - No test logic
-- Concrete modules (e.g. authorization.py, injection.py) 
+- Concrete modules (e.g. authorization.py, injection.py)
   subclass VulnerabilityTest and implement `run()`.
 """
 
@@ -30,13 +30,13 @@ class VulnerabilityResult:
     """
 
     test_name: str
-    owasp_category: str          # e.g. "API1:2023 Broken Object Level Authorization"
-    architecture: str            # "rest" or "graphql"
-    target: str                  # e.g. "vampi", "dvga"
-    passed: bool                 # True = no vulnerability detected, False = vulnerability found
+    owasp_category: str  # e.g. "API1:2023 Broken Object Level Authorization"
+    architecture: str  # "rest" or "graphql"
+    target: str  # e.g. "vampi", "dvga"
+    passed: bool  # True = no vulnerability detected, False = vulnerability found
     severity: Severity
-    evidence: str                # human-readable description of what was observed
-    request_summary: Optional[str] = None   # e.g. method + path, redacted of secrets
+    evidence: str  # human-readable description of what was observed
+    request_summary: Optional[str] = None  # e.g. method + path, redacted of secrets
     response_summary: Optional[str] = None  # e.g. status code + relevant snippet
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()

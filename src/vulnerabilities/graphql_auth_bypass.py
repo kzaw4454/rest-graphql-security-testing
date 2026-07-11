@@ -158,7 +158,9 @@ class GraphiQLInterfaceProtectionBypassTest(VulnerabilityTest):
         data = _parse_json(resp) or {}
         typename = data.get("data", {}).get("__typename") if data.get("data") else None
 
-        confirmed = resp.status_code == 200 and not data.get("errors") and bool(typename)
+        confirmed = (
+            resp.status_code == 200 and not data.get("errors") and bool(typename)
+        )
 
         evidence = (
             f"query {self.PROBE_QUERY!r} via {cfg.get('graphiql_path', '/graphiql')} "
@@ -224,15 +226,15 @@ class QueryDenyListBypassTest(VulnerabilityTest):
     def _test_bypass_query_succeeds(self) -> VulnerabilityResult:
         """Bypass: the same restricted field, wrapped in an allow-listed operation name."""
         cfg = self.client.scan_config.get("deny_list_bypass", {})
-        bypass_query = cfg.get(
-            "bypass_query", "query getPastes {\n  systemHealth\n}"
-        )
+        bypass_query = cfg.get("bypass_query", "query getPastes {\n  systemHealth\n}")
         operation_name = cfg.get("bypass_operation_name", "getPastes")
         resp = self.client.query(bypass_query, operation_name=operation_name)
         data = _parse_json(resp) or {}
         system_health = data.get("data", {}).get("systemHealth")
 
-        confirmed = resp.status_code == 200 and not data.get("errors") and bool(system_health)
+        confirmed = (
+            resp.status_code == 200 and not data.get("errors") and bool(system_health)
+        )
 
         evidence = (
             f"query {bypass_query!r} with operationName={operation_name!r} -> "
@@ -266,7 +268,9 @@ def _print_results(results: list[VulnerabilityResult]) -> None:
         print()
 
 
-def _wait_for_dvga(client: DVGAClient, timeout: float = 30.0, interval: float = 2.0) -> None:
+def _wait_for_dvga(
+    client: DVGAClient, timeout: float = 30.0, interval: float = 2.0
+) -> None:
     """
     Poll the container until it accepts connections.
     """

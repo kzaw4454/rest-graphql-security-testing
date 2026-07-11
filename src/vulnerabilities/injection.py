@@ -3,10 +3,10 @@ SQL/NoSQL injection tests.
 
 VAmPI: `SQLiUserLookupTest` reseeds via /createdb at the start of run().
 
-crAPI: `NoSQLiCouponValidateTest` and `SQLiApplyCouponTest` run signs up 
-a fresh synthetic identity (no reseeding). 
+crAPI: `NoSQLiCouponValidateTest` and `SQLiApplyCouponTest` run signs up
+a fresh synthetic identity (no reseeding).
 
-`SQLiApplyCouponTest`'s sub-test adds one row to crAPI's `applied_coupon` 
+`SQLiApplyCouponTest`'s sub-test adds one row to crAPI's `applied_coupon`
 table per run as a setup step.
 """
 
@@ -79,8 +79,7 @@ class SQLiUserLookupTest(VulnerabilityTest):
     # -- request plumbing ------------------------------------------------
 
     def _path_for(self, raw_value: str) -> str:
-        """Percent-encode the payload as a single path segment ourselves.
-        """
+        """Percent-encode the payload as a single path segment ourselves."""
         template = self.client.endpoints.get("sqli_target", "/users/v1/{username}")
         encoded = urllib.parse.quote(raw_value, safe="")
         return template.format(username=encoded)
@@ -88,8 +87,7 @@ class SQLiUserLookupTest(VulnerabilityTest):
     def _safe_get(
         self, path: str, as_user: Optional[str] = None
     ) -> Optional[requests.Response]:
-        """GET the path, treating transport-level failures as a signal.
-        """
+        """GET the path, treating transport-level failures as a signal."""
         try:
             return self.client.get(path, as_user=as_user)
         except requests.exceptions.RequestException as exc:
@@ -106,8 +104,7 @@ class SQLiUserLookupTest(VulnerabilityTest):
     # -- individual checks -------------------------------------------------
 
     def _test_control_nonexistent_user(self) -> VulnerabilityResult:
-        """Baseline: a genuinely nonexistent, non-malicious username must 404.
-        """
+        """Baseline: a genuinely nonexistent, non-malicious username must 404."""
         control_username = f"nonexistent_{uuid.uuid4().hex[:10]}"
         path = self._path_for(control_username)
         resp = self._safe_get(path)
@@ -370,7 +367,9 @@ class NoSQLiCouponValidateTest(VulnerabilityTest):
         try:
             return self.client.validate_coupon(body, as_user=as_user)
         except requests.exceptions.RequestException as exc:
-            logger.warning("validate-coupon request failed at the transport level: %s", exc)
+            logger.warning(
+                "validate-coupon request failed at the transport level: %s", exc
+            )
             return None
 
     @staticmethod
@@ -441,7 +440,9 @@ class NoSQLiCouponValidateTest(VulnerabilityTest):
                 "since coupons have no per-user ownership concept at all."
             )
         else:
-            evidence += " NOT rejected — this endpoint has no authentication check at all."
+            evidence += (
+                " NOT rejected — this endpoint has no authentication check at all."
+            )
 
         return self._result(
             passed=rejected,
@@ -550,7 +551,9 @@ class SQLiApplyCouponTest(VulnerabilityTest):
         try:
             return self.client.apply_coupon(coupon_code, amount, as_user=as_user)
         except requests.exceptions.RequestException as exc:
-            logger.warning("apply_coupon request failed at the transport level: %s", exc)
+            logger.warning(
+                "apply_coupon request failed at the transport level: %s", exc
+            )
             return None
 
     @staticmethod
@@ -621,7 +624,9 @@ class SQLiApplyCouponTest(VulnerabilityTest):
                 "to that token's own user_id, not gated by any coupon-ownership check."
             )
         else:
-            evidence += " NOT rejected — this endpoint has no authentication check at all."
+            evidence += (
+                " NOT rejected — this endpoint has no authentication check at all."
+            )
 
         return self._result(
             passed=rejected,
@@ -649,7 +654,9 @@ class SQLiApplyCouponTest(VulnerabilityTest):
         message = str(data.get("message", ""))
         confirmed = "postgresql" in message.lower()
 
-        evidence = f"Payload {payload!r} -> HTTP {resp.status_code}, message={message!r}."
+        evidence = (
+            f"Payload {payload!r} -> HTTP {resp.status_code}, message={message!r}."
+        )
         if confirmed:
             evidence += (
                 " Message contains a PostgreSQL version banner — the raw query executed as two "
@@ -744,7 +751,9 @@ class SQLiApplyCouponTest(VulnerabilityTest):
         # applied in setup, even though `payload` — a different, literally
         # non-matching string — is what was actually sent as coupon_code.
         confirmed = (
-            resp.status_code == 400 and applied_code in message and payload not in message
+            resp.status_code == 400
+            and applied_code in message
+            and payload not in message
         )
 
         evidence = f"Tautology payload {payload!r} -> HTTP {resp.status_code}, message={message!r}."

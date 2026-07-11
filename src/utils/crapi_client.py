@@ -50,7 +50,9 @@ class CrAPIClient(RESTAPIClient):
         data = resp.json()
         token = data.get("token")
         if not token:
-            raise RuntimeError(f"Login response for '{role}' did not contain a token: {data}")
+            raise RuntimeError(
+                f"Login response for '{role}' did not contain a token: {data}"
+            )
 
         self._tokens[role] = token
         logger.info("Login '%s': token stored", role)
@@ -91,5 +93,7 @@ class CrAPIClient(RESTAPIClient):
     def _require_user(self, role: str) -> dict[str, str]:
         user = self.test_users.get(role)
         if not user:
-            raise ConfigError(f"No test user configured for role '{role}' in config file")
+            raise ConfigError(
+                f"No test user configured for role '{role}' in config file"
+            )
         return user

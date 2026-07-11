@@ -47,7 +47,9 @@ class JuiceShopClient(RESTAPIClient):
         auth = data.get("authentication", {})
         token = auth.get("token")
         if not token:
-            raise RuntimeError(f"Login response for '{role}' did not contain a token: {data}")
+            raise RuntimeError(
+                f"Login response for '{role}' did not contain a token: {data}"
+            )
 
         self._tokens[role] = token
         bid = auth.get("bid")
@@ -81,5 +83,7 @@ class JuiceShopClient(RESTAPIClient):
     def _require_user(self, role: str) -> dict[str, str]:
         user = self.test_users.get(role)
         if not user:
-            raise ConfigError(f"No test user configured for role '{role}' in config file")
+            raise ConfigError(
+                f"No test user configured for role '{role}' in config file"
+            )
         return user
