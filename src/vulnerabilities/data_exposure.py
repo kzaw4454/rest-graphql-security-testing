@@ -8,6 +8,7 @@ import logging
 import uuid
 
 from src.utils.juiceshop_client import JuiceShopClient
+from src.utils.results_logger import RunLogger
 from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
 
 logger = logging.getLogger(__name__)
@@ -173,7 +174,9 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
     client = JuiceShopClient.from_config("config/juiceshop.yaml")
-    test = ExcessiveUserDataExposureTest(
-        architecture="rest", target="juiceshop", client=client
-    )
-    _print_results(test.run())
+    with RunLogger("rest", "juiceshop", "config/juiceshop.yaml") as run:
+        results = ExcessiveUserDataExposureTest(
+            architecture="rest", target="juiceshop", client=client
+        ).run()
+        run.log_results(results)
+    _print_results(results)

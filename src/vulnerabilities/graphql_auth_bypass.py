@@ -10,6 +10,7 @@ from typing import Any, Optional
 import requests
 
 from src.utils.dvga_client import DVGAClient
+from src.utils.results_logger import RunLogger
 from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
 
 logger = logging.getLogger(__name__)
@@ -286,20 +287,25 @@ def _wait_for_dvga(client: DVGAClient, timeout: float = 30.0, interval: float = 
 def _run_dvga() -> None:
     dvga_client = DVGAClient.from_config("config/dvga.yaml")
     _wait_for_dvga(dvga_client)
-    _print_results(
-        JWTTokenForgeTest(architecture="graphql", target="dvga", client=dvga_client).run()
-    )
-    _print_results(
-        GraphiQLInterfaceProtectionBypassTest(
+
+    with RunLogger("graphql", "dvga", "config/dvga.yaml") as run:
+        jwt_results = JWTTokenForgeTest(
             architecture="graphql", target="dvga", client=dvga_client
         ).run()
-    )
-    _print_results(
-        QueryDenyListBypassTest(
+        run.log_results(jwt_results)
+        graphiql_results = GraphiQLInterfaceProtectionBypassTest(
             architecture="graphql", target="dvga", client=dvga_client
         ).run()
-    )
-    dvga_client.set_difficulty("easy")
+        run.log_results(graphiql_results)
+        deny_list_results = QueryDenyListBypassTest(
+            architecture="graphql", target="dvga", client=dvga_client
+        ).run()
+        run.log_results(deny_list_results)
+        dvga_client.set_difficulty("easy")
+
+    _print_results(jwt_results)
+    _print_results(graphiql_results)
+    _print_results(deny_list_results)
 
 
 if __name__ == "__main__":

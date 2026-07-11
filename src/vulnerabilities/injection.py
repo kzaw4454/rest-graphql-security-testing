@@ -21,6 +21,7 @@ from typing import Any, Optional
 import requests
 
 from src.utils.crapi_client import CrAPIClient
+from src.utils.results_logger import RunLogger
 from src.utils.vampi_client import VAmPIClient
 from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
 
@@ -781,21 +782,27 @@ def _print_results(results: list[VulnerabilityResult]) -> None:
 
 def _run_vampi() -> None:
     vampi_client = VAmPIClient.from_config("config/vampi.yaml")
-    _print_results(
-        SQLiUserLookupTest(architecture="rest", target="vampi", client=vampi_client).run()
-    )
+    with RunLogger("rest", "vampi", "config/vampi.yaml") as run:
+        vampi_results = SQLiUserLookupTest(
+            architecture="rest", target="vampi", client=vampi_client
+        ).run()
+        run.log_results(vampi_results)
+    _print_results(vampi_results)
 
 
 def _run_crapi() -> None:
     crapi_client = CrAPIClient.from_config("config/crapi.yaml")
-    _print_results(
-        NoSQLiCouponValidateTest(
+    with RunLogger("rest", "crapi", "config/crapi.yaml") as run:
+        nosqli_results = NoSQLiCouponValidateTest(
             architecture="rest", target="crapi", client=crapi_client
         ).run()
-    )
-    _print_results(
-        SQLiApplyCouponTest(architecture="rest", target="crapi", client=crapi_client).run()
-    )
+        run.log_results(nosqli_results)
+        sqli_results = SQLiApplyCouponTest(
+            architecture="rest", target="crapi", client=crapi_client
+        ).run()
+        run.log_results(sqli_results)
+    _print_results(nosqli_results)
+    _print_results(sqli_results)
 
 
 if __name__ == "__main__":
