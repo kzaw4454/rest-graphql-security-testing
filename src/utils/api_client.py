@@ -57,33 +57,78 @@ class RESTAPIClient:
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
 
-    def _headers_for(self, as_user: Optional[str]) -> dict[str, str]:
+    def _headers_for(
+        self, as_user: Optional[str] = None, token: Optional[str] = None
+    ) -> dict[str, str]:
+        """Build the auth header. `token`, when given, is sent as-is —
+        bypassing `_tokens` lookup — so callers can attach a forged or
+        otherwise arbitrary bearer value (e.g. weak-signing-key tests)
+        without it ever being stored under a role.
+        """
+        if token is not None:
+            return {self.token_header: f"{self.token_prefix} {token}"}
         headers = {}
         if as_user:
-            token = self._tokens.get(as_user)
-            if not token:
+            stored_token = self._tokens.get(as_user)
+            if not stored_token:
                 raise RuntimeError(
                     f"No token stored for user role '{as_user}'. Call login() first."
                 )
-            headers[self.token_header] = f"{self.token_prefix} {token}"
+            headers[self.token_header] = f"{self.token_prefix} {stored_token}"
         return headers
 
-    def get(self, path: str, as_user: Optional[str] = None, **kwargs: Any) -> requests.Response:
+    def get(
+        self,
+        path: str,
+        as_user: Optional[str] = None,
+        token: Optional[str] = None,
+        **kwargs: Any,
+    ) -> requests.Response:
         return self.session.get(
-            self._url(path), headers=self._headers_for(as_user), timeout=self.timeout, **kwargs
+            self._url(path),
+            headers=self._headers_for(as_user, token),
+            timeout=self.timeout,
+            **kwargs,
         )
 
-    def post(self, path: str, as_user: Optional[str] = None, **kwargs: Any) -> requests.Response:
+    def post(
+        self,
+        path: str,
+        as_user: Optional[str] = None,
+        token: Optional[str] = None,
+        **kwargs: Any,
+    ) -> requests.Response:
         return self.session.post(
-            self._url(path), headers=self._headers_for(as_user), timeout=self.timeout, **kwargs
+            self._url(path),
+            headers=self._headers_for(as_user, token),
+            timeout=self.timeout,
+            **kwargs,
         )
 
-    def put(self, path: str, as_user: Optional[str] = None, **kwargs: Any) -> requests.Response:
+    def put(
+        self,
+        path: str,
+        as_user: Optional[str] = None,
+        token: Optional[str] = None,
+        **kwargs: Any,
+    ) -> requests.Response:
         return self.session.put(
-            self._url(path), headers=self._headers_for(as_user), timeout=self.timeout, **kwargs
+            self._url(path),
+            headers=self._headers_for(as_user, token),
+            timeout=self.timeout,
+            **kwargs,
         )
 
-    def delete(self, path: str, as_user: Optional[str] = None, **kwargs: Any) -> requests.Response:
+    def delete(
+        self,
+        path: str,
+        as_user: Optional[str] = None,
+        token: Optional[str] = None,
+        **kwargs: Any,
+    ) -> requests.Response:
         return self.session.delete(
-            self._url(path), headers=self._headers_for(as_user), timeout=self.timeout, **kwargs
+            self._url(path),
+            headers=self._headers_for(as_user, token),
+            timeout=self.timeout,
+            **kwargs,
         )

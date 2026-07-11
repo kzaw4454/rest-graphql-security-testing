@@ -5,7 +5,7 @@ VAmPI-specific REST API client.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Optional
 
 import requests
 
@@ -41,6 +41,15 @@ class VAmPIClient(RESTAPIClient):
         logger.info("Register '%s': %s -> %s", role, path, resp.status_code)
         return resp
 
+    def get_debug(self, as_user: Optional[str] = None) -> requests.Response:
+        """Hit the debug/data-dump endpoint, unauthenticated or as `role`."""
+        path = self.endpoints.get("debug", "/users/v1/_debug")
+        resp = self.get(path, as_user=as_user)
+        logger.info(
+            "Debug endpoint as_user=%r: %s -> %s", as_user, path, resp.status_code
+        )
+        return resp
+
     def login(self, role: str) -> str:
         """Log in a test user and store their token for later requests."""
         user = self._require_user(role)
@@ -52,7 +61,9 @@ class VAmPIClient(RESTAPIClient):
         data = resp.json()
         token = data.get("auth_token")
         if not token:
-            raise RuntimeError(f"Login response for '{role}' did not contain a token: {data}")
+            raise RuntimeError(
+                f"Login response for '{role}' did not contain a token: {data}"
+            )
 
         self._tokens[role] = token
         logger.info("Login '%s': token stored", role)
@@ -61,5 +72,7 @@ class VAmPIClient(RESTAPIClient):
     def _require_user(self, role: str) -> dict[str, str]:
         user = self.test_users.get(role)
         if not user:
-            raise ConfigError(f"No test user configured for role '{role}' in config file")
+            raise ConfigError(
+                f"No test user configured for role '{role}' in config file"
+            )
         return user

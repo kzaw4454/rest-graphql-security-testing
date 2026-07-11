@@ -1,5 +1,5 @@
 """
-Excessive Data Exposure (OWASP API3:2023) test against Juice Shop.
+Excessive Data Exposure (OWASP API3:2023) tests.
 """
 
 from __future__ import annotations
@@ -7,11 +7,19 @@ from __future__ import annotations
 import logging
 import uuid
 
+import requests
+
 from src.utils.juiceshop_client import JuiceShopClient
 from src.utils.results_logger import RunLogger
+from src.utils.vampi_client import VAmPIClient
 from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
 
 logger = logging.getLogger(__name__)
+
+# VAmPI's own fixture accounts and their plaintext passwords, seeded on
+# every /createdb reseed by models/user_model.py::init_db_users() —
+# independent of this framework's synthetic attacker/victim test_users.
+VAMPI_SEEDED_CREDENTIALS = {"name1": "pass1", "name2": "pass2", "admin": "pass1"}
 
 
 class ExcessiveUserDataExposureTest(VulnerabilityTest):
@@ -149,7 +157,9 @@ class ExcessiveUserDataExposureTest(VulnerabilityTest):
                 "authenticated, non-privileged user, not a missing auth check."
             )
         else:
-            evidence += " NOT rejected — this endpoint has no authentication check at all."
+            evidence += (
+                " NOT rejected — this endpoint has no authentication check at all."
+            )
 
         return self._result(
             passed=rejected,
@@ -157,6 +167,107 @@ class ExcessiveUserDataExposureTest(VulnerabilityTest):
             evidence=evidence,
             request_summary=f"GET {path} as_user=None",
             response_summary=f"HTTP {resp.status_code}",
+        )
+
+
+class VAmPIDebugEndpointExposureTest(VulnerabilityTest):
+    """
+    Confirms whether VAmPI's debug endpoint leaks every user's full record,
+    including their password in cleartext, and whether that leak requires
+    any authentication at all.
+    """
+
+    name = "vampi_debug_endpoint_exposure"
+    owasp_category = "API3:2023 Excessive Data Exposure"
+
+    def __init__(self, architecture: str, target: str, client: VAmPIClient) -> None:
+        super().__init__(architecture, target)
+        self.client = client
+
+    def run(self) -> list[VulnerabilityResult]:
+        self.client.seed_database()
+        self.client.register("attacker")
+        self.client.login("attacker")
+        return [
+            self._test_unauthenticated_exposure(),
+            self._test_authenticated_low_priv_exposure(),
+        ]
+
+    def _evaluate(self, resp: requests.Response) -> tuple[bool, bool, int]:
+        """Returns (leaked, passwords_plaintext, record_count)."""
+        if resp.status_code != 200:
+            return False, False, 0
+        try:
+            body = resp.json()
+        except ValueError:
+            return False, False, 0
+
+        records = body.get("users", [])
+        if not isinstance(records, list):
+            return False, False, 0
+
+        plaintext_matches = [
+            r
+            for r in records
+            if isinstance(r, dict)
+            and VAMPI_SEEDED_CREDENTIALS.get(r.get("username")) == r.get("password")
+        ]
+        return bool(records), bool(plaintext_matches), len(records)
+
+    def _test_unauthenticated_exposure(self) -> VulnerabilityResult:
+        path = self.client.endpoints.get("debug", "/users/v1/_debug")
+        resp = self.client.get_debug(as_user=None)
+        leaked, plaintext, count = self._evaluate(resp)
+
+        evidence = (
+            f"GET {path} with no Authorization header -> HTTP {resp.status_code}."
+        )
+        if leaked:
+            evidence += f" Returned {count} full user record(s), including 'admin'."
+            evidence += (
+                " Each record's 'password' field matches this app's own seeded "
+                "plaintext credentials verbatim (e.g. name1:pass1), confirming "
+                "passwords are stored and returned in the clear rather than hashed."
+                if plaintext
+                else " The 'password' field is present but does not match a known "
+                "plaintext seed value — inconclusive on hashing."
+            )
+
+        return self._result(
+            passed=not leaked,
+            severity=Severity.CRITICAL if leaked else Severity.LOW,
+            evidence=evidence,
+            request_summary=f"GET {path} as_user=None",
+            response_summary=f"HTTP {resp.status_code}; records={count}; plaintext_passwords={plaintext}",
+        )
+
+    def _test_authenticated_low_priv_exposure(self) -> VulnerabilityResult:
+        """Retest with a valid, non-admin token attached — confirms the
+        endpoint has no access control gate at all, not merely a missing
+        one for unauthenticated callers.
+        """
+        path = self.client.endpoints.get("debug", "/users/v1/_debug")
+        resp = self.client.get_debug(as_user="attacker")
+        leaked, plaintext, count = self._evaluate(resp)
+
+        evidence = (
+            f"GET {path} with a valid, non-admin token ('attacker') -> "
+            f"HTTP {resp.status_code}."
+        )
+        if leaked:
+            evidence += (
+                f" Still returned {count} full user record(s) including 'admin' — "
+                "an ordinary authenticated user sees the exact same data as an "
+                "unauthenticated request, confirming there is no access-control "
+                "check on this endpoint at all, not just a missing one."
+            )
+
+        return self._result(
+            passed=not leaked,
+            severity=Severity.CRITICAL if leaked else Severity.LOW,
+            evidence=evidence,
+            request_summary=f"GET {path} as_user='attacker'",
+            response_summary=f"HTTP {resp.status_code}; records={count}; plaintext_passwords={plaintext}",
         )
 
 
@@ -170,9 +281,7 @@ def _print_results(results: list[VulnerabilityResult]) -> None:
         print()
 
 
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-
+def _run_juiceshop() -> None:
     client = JuiceShopClient.from_config("config/juiceshop.yaml")
     with RunLogger("rest", "juiceshop", "config/juiceshop.yaml") as run:
         results = ExcessiveUserDataExposureTest(
@@ -180,3 +289,37 @@ if __name__ == "__main__":
         ).run()
         run.log_results(results)
     _print_results(results)
+
+
+def _run_vampi() -> None:
+    client = VAmPIClient.from_config("config/vampi.yaml")
+    with RunLogger("rest", "vampi", "config/vampi.yaml") as run:
+        results = VAmPIDebugEndpointExposureTest(
+            architecture="rest", target="vampi", client=client
+        ).run()
+        run.log_results(results)
+    _print_results(results)
+
+
+if __name__ == "__main__":
+    import argparse
+
+    logging.basicConfig(level=logging.INFO)
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--target",
+        choices=["vampi", "juiceshop", "all"],
+        default="all",
+        help=(
+            "Which target's container must be up. Default 'all' requires both "
+            "docker-compose.vampi.yml and docker-compose.juiceshop.yml to be running "
+            "— pass --target to run just one."
+        ),
+    )
+    args = parser.parse_args()
+
+    if args.target in ("vampi", "all"):
+        _run_vampi()
+    if args.target in ("juiceshop", "all"):
+        _run_juiceshop()
