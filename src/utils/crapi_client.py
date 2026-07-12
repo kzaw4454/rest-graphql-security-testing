@@ -5,6 +5,8 @@ crAPI-specific REST API client.
 from __future__ import annotations
 
 import logging
+import re
+import time
 from typing import Any, Optional
 
 import requests
@@ -12,6 +14,12 @@ import requests
 from src.utils.api_client import ConfigError, RESTAPIClient
 
 logger = logging.getLogger(__name__)
+
+# crAPI's welcome email embeds a per-account VIN/pincode as HTML font tags;
+# MailHog stores the raw MIME source, so these patterns pull the two values
+# straight out of it (see fetch_welcome_credentials).
+_VIN_PATTERN = re.compile(r"VIN:\s*</font><font[^>]*>([A-Z0-9]+)")
+_PINCODE_PATTERN = re.compile(r"Pincode:\s*<font[^>]*>(\d+)")
 
 
 class CrAPIClient(RESTAPIClient):
@@ -89,6 +97,108 @@ class CrAPIClient(RESTAPIClient):
             timeout=self.timeout,
         )
         return resp
+
+    def add_vehicle(
+        self, vin: str, pincode: str, as_user: Optional[str]
+    ) -> requests.Response:
+        """
+        Registers a vehicle (by VIN + pincode) to the calling account.
+        """
+        path = self.endpoints.get("add_vehicle", "/identity/api/v2/vehicle/add_vehicle")
+        resp = self.session.post(
+            self._url(path),
+            json={"vin": vin, "pincode": pincode},
+            headers=self._headers_for(as_user),
+            timeout=self.timeout,
+        )
+        return resp
+
+    def list_vehicles(self, as_user: Optional[str]) -> requests.Response:
+        """
+        Lists vehicles registered to the calling account.
+        """
+        path = self.endpoints.get("vehicles", "/identity/api/v2/vehicle/vehicles")
+        return self.session.get(
+            self._url(path), headers=self._headers_for(as_user), timeout=self.timeout
+        )
+
+    def get_vehicle_location(
+        self, vehicle_id: str, as_user: Optional[str]
+    ) -> requests.Response:
+        """
+        Fetches a vehicle's GPS location and owner details by vehicle id.
+        """
+        template = self.endpoints.get(
+            "vehicle_location", "/identity/api/v2/vehicle/{vehicle_id}/location"
+        )
+        path = template.format(vehicle_id=vehicle_id)
+        return self.session.get(
+            self._url(path), headers=self._headers_for(as_user), timeout=self.timeout
+        )
+
+    def create_order(
+        self, product_id: int, quantity: int, as_user: Optional[str]
+    ) -> requests.Response:
+        """
+        Places a shop order for the calling account.
+        """
+        path = self.endpoints.get("create_order", "/workshop/api/shop/orders")
+        return self.session.post(
+            self._url(path),
+            json={"product_id": product_id, "quantity": quantity},
+            headers=self._headers_for(as_user),
+            timeout=self.timeout,
+        )
+
+    def get_order(self, order_id: int, as_user: Optional[str]) -> requests.Response:
+        """
+        Fetches a single order's detail by order id.
+        """
+        template = self.endpoints.get(
+            "order_detail", "/workshop/api/shop/orders/{order_id}"
+        )
+        path = template.format(order_id=order_id)
+        return self.session.get(
+            self._url(path), headers=self._headers_for(as_user), timeout=self.timeout
+        )
+
+    def list_orders(self, as_user: Optional[str]) -> requests.Response:
+        """
+        Lists orders belonging to the calling account.
+        """
+        path = self.endpoints.get("orders_all", "/workshop/api/shop/orders/all")
+        return self.session.get(
+            self._url(path), headers=self._headers_for(as_user), timeout=self.timeout
+        )
+
+    def fetch_welcome_credentials(
+        self, email: str, max_attempts: int = 5, poll_interval: float = 1.0
+    ) -> Optional[tuple[str, str]]:
+        """
+        Retrieves the VIN and pincode crAPI emails a new account on signup,
+        via the MailHog instance in the crAPI docker-compose stack. Polls
+        briefly since delivery to MailHog is asynchronous.
+        """
+        mailhog_url = self._config.get("target", {}).get(
+            "mailhog_base_url", "http://127.0.0.1:8025"
+        )
+        search_url = f"{mailhog_url}/api/v2/search"
+        for _ in range(max_attempts):
+            resp = self.session.get(
+                search_url,
+                params={"kind": "to", "query": email},
+                timeout=self.timeout,
+            )
+            if resp.status_code == 200:
+                items = resp.json().get("items", [])
+                if items:
+                    raw = items[0]["Raw"]["Data"]
+                    vin_match = _VIN_PATTERN.search(raw)
+                    pin_match = _PINCODE_PATTERN.search(raw)
+                    if vin_match and pin_match:
+                        return vin_match.group(1), pin_match.group(1)
+            time.sleep(poll_interval)
+        return None
 
     def _require_user(self, role: str) -> dict[str, str]:
         user = self.test_users.get(role)
