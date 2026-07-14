@@ -1,0 +1,354 @@
+"""
+Comparative metrics for REST vs GraphQL vulnerability scan results.
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import json
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Optional
+
+import yaml
+
+logger = logging.getLogger(__name__)
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+RESULTS_LOG_ROOT = REPO_ROOT / "results" / "logs"
+ANALYSIS_OUTPUT_ROOT = REPO_ROOT / "results" / "analysis"
+GROUND_TRUTH_PATH = REPO_ROOT / "config" / "ground_truth.yaml"
+
+# Row-level metrics only ever count assertions that test the module's target
+# vulnerability. A CONTROL row failing means a baseline assumption broke, not
+# that a vulnerability was found, so it is never counted here.
+FINDING_ROLES = ("detection", "adjacent")
+
+
+@dataclass
+class LoggedResult:
+    """One VulnerabilityResult row as persisted by RunLogger's JSONL output."""
+
+    test_name: str
+    owasp_category: str
+    architecture: str
+    target: str
+    passed: bool
+    severity: str
+    assertion_role: str
+    run_id: str
+    timestamp: str
+
+
+@dataclass
+class RowLevelMetrics:
+    """
+    Detection rate / precision / recall / F1 from DETECTION and ADJACENT rows.
+    """
+
+    target: str
+    true_positives: int
+    false_negatives: int
+    total_finding_assertions: int
+    detection_rate: float
+    precision: float
+    recall: float
+    f1: float
+
+
+@dataclass
+class VulnerabilityCoverage:
+    """Tested-vs-documented coverage for one target, from ground_truth.yaml."""
+
+    target: str
+    documented_count: int
+    tested_count: int
+    detected_count: int
+    coverage_rate: float
+    untested: list[str] = field(default_factory=list)
+    tested_not_detected: list[str] = field(default_factory=list)
+
+
+def _latest_run_jsonl(category_dir: Path) -> Optional[Path]:
+    """
+    Pick the most recent run's .jsonl in an owasp_category folder
+    """
+    jsonl_files = sorted(category_dir.glob("*.jsonl"))
+    return jsonl_files[-1] if jsonl_files else None
+
+
+def _target_dir(target: str, architecture: Optional[str]) -> Path:
+    if architecture is not None:
+        return RESULTS_LOG_ROOT / architecture / target
+    for architecture_dir in sorted(RESULTS_LOG_ROOT.iterdir()):
+        if not architecture_dir.is_dir():
+            continue
+        candidate = architecture_dir / target
+        if candidate.is_dir():
+            return candidate
+    raise FileNotFoundError(
+        f"No results/logs/<architecture>/{target}/ directory found under {RESULTS_LOG_ROOT}"
+    )
+
+
+def load_latest_results(
+    target: str, architecture: Optional[str] = None
+) -> list[LoggedResult]:
+    """
+    Load the most recent run's rows for every owasp_category folder under
+    results/logs/<architecture>/<target>/.
+    """
+    target_dir = _target_dir(target, architecture)
+
+    results: list[LoggedResult] = []
+    for category_dir in sorted(target_dir.iterdir()):
+        if not category_dir.is_dir():
+            continue  # skip *.manifest.json files sitting alongside category folders
+        latest = _latest_run_jsonl(category_dir)
+        if latest is None:
+            continue
+        with latest.open("r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                record = json.loads(line)
+                results.append(
+                    LoggedResult(
+                        test_name=record["test_name"],
+                        owasp_category=record["owasp_category"],
+                        architecture=record["architecture"],
+                        target=record["target"],
+                        passed=record["passed"],
+                        severity=record["severity"],
+                        assertion_role=record["assertion_role"],
+                        run_id=record["run_id"],
+                        timestamp=record["timestamp"],
+                    )
+                )
+    return results
+
+
+def load_ground_truth(
+    target: str, path: Path = GROUND_TRUTH_PATH
+) -> list[dict[str, Any]]:
+    """Documented vulnerabilities for a target."""
+    with path.open("r") as f:
+        data = yaml.safe_load(f) or {}
+    return data.get(target, [])
+
+
+def compute_row_level_metrics(
+    target: str, results: list[LoggedResult]
+) -> RowLevelMetrics:
+    """
+    TP/FN from DETECTION/ADJACENT rows only: passed=False -> TP (vulnerability
+    confirmed), passed=True -> FN.
+    """
+    finding_rows = [r for r in results if r.assertion_role in FINDING_ROLES]
+    true_positives = sum(1 for r in finding_rows if not r.passed)
+    false_negatives = sum(1 for r in finding_rows if r.passed)
+    total = len(finding_rows)
+
+    recall = (
+        true_positives / (true_positives + false_negatives)
+        if (true_positives + false_negatives)
+        else 0.0
+    )
+    precision = 1.0 if true_positives > 0 else 0.0
+    f1 = (
+        (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+    )
+
+    return RowLevelMetrics(
+        target=target,
+        true_positives=true_positives,
+        false_negatives=false_negatives,
+        total_finding_assertions=total,
+        detection_rate=recall,
+        precision=precision,
+        recall=recall,
+        f1=f1,
+    )
+
+
+def compute_vulnerability_coverage(
+    target: str, results: list[LoggedResult], ground_truth: list[dict[str, Any]]
+) -> VulnerabilityCoverage:
+    """
+    "detected":  atleast one of its test_names appears among the loaded rows
+    with assertion_role and passed=False
+    """
+    confirmed_test_names = {
+        r.test_name
+        for r in results
+        if r.assertion_role in FINDING_ROLES and not r.passed
+    }
+
+    documented_count = len(ground_truth)
+    tested_count = sum(1 for v in ground_truth if v["tested"])
+    untested = [v["vulnerability"] for v in ground_truth if not v["tested"]]
+
+    tested_not_detected = []
+    detected_count = 0
+    for vuln in ground_truth:
+        if not vuln["tested"]:
+            continue
+        if any(name in confirmed_test_names for name in vuln["test_names"]):
+            detected_count += 1
+        else:
+            tested_not_detected.append(vuln["vulnerability"])
+
+    return VulnerabilityCoverage(
+        target=target,
+        documented_count=documented_count,
+        tested_count=tested_count,
+        detected_count=detected_count,
+        coverage_rate=(tested_count / documented_count) if documented_count else 0.0,
+        untested=untested,
+        tested_not_detected=tested_not_detected,
+    )
+
+
+def severity_distribution(results: list[LoggedResult]) -> dict[str, int]:
+    """
+    Counts by severity across the given rows. Supporting descriptive stats
+    only -- not part of detection rate / precision / recall / F1.
+    """
+    counts: dict[str, int] = {}
+    for r in results:
+        counts[r.severity] = counts.get(r.severity, 0) + 1
+    return counts
+
+
+def _print_summary(
+    target: str,
+    row_metrics: RowLevelMetrics,
+    coverage: VulnerabilityCoverage,
+    severity_counts: dict[str, int],
+) -> None:
+    print(f"=== Comparative stats: {target} ===\n")
+
+    print("-- Row-level (DETECTION/ADJACENT rows only) --")
+    print(f"True positives:            {row_metrics.true_positives}")
+    print(f"False negatives:           {row_metrics.false_negatives}")
+    print(f"Total finding assertions:  {row_metrics.total_finding_assertions}")
+    print(f"Detection rate:            {row_metrics.detection_rate:.4f}")
+    print(f"Precision:                 {row_metrics.precision:.4f}")
+    print(f"Recall:                    {row_metrics.recall:.4f}")
+    print(f"F1:                        {row_metrics.f1:.4f}")
+    print(
+        "Note: precision/F1 are structurally 1.0 whenever any vulnerability is "
+        "detected -- no known-negative test cases exist yet to produce a false "
+        "positive under the current test design (see false-positive-rate "
+        "caveat below)."
+    )
+    print()
+
+    print("-- Vulnerability-level coverage (config/ground_truth.yaml) --")
+    print(f"Documented vulnerabilities: {coverage.documented_count}")
+    print(f"Tested vulnerabilities:     {coverage.tested_count}")
+    print(f"Coverage rate:              {coverage.coverage_rate:.4f}")
+    print(f"Detected this run:          {coverage.detected_count}")
+    if coverage.untested:
+        print("Untested (no test module yet):")
+        for name in coverage.untested:
+            print(f"  - {name}")
+    if coverage.tested_not_detected:
+        print("Tested but not detected in this run:")
+        for name in coverage.tested_not_detected:
+            print(f"  - {name}")
+    print()
+
+    print("-- Severity distribution (confirmed findings) --")
+    for severity in ("critical", "high", "medium", "low"):
+        if severity in severity_counts:
+            print(f"{severity.capitalize():10s} {severity_counts[severity]}")
+    print()
+
+    print("-- Deferred (see CLAUDE.md's Analysis & Metrics section) --")
+    print("False positive rate: not computed (no known-negative test cases)")
+    print("Mann-Whitney U / Chi-square / Cohen's d: stretch goal, not run")
+
+
+def _write_summary_csv(
+    path: Path,
+    target: str,
+    row_metrics: RowLevelMetrics,
+    coverage: VulnerabilityCoverage,
+    severity_counts: dict[str, int],
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["metric", "value"])
+        writer.writerow(["target", target])
+        writer.writerow(["true_positives", row_metrics.true_positives])
+        writer.writerow(["false_negatives", row_metrics.false_negatives])
+        writer.writerow(
+            ["total_finding_assertions", row_metrics.total_finding_assertions]
+        )
+        writer.writerow(["detection_rate", f"{row_metrics.detection_rate:.4f}"])
+        writer.writerow(["precision", f"{row_metrics.precision:.4f}"])
+        writer.writerow(["recall", f"{row_metrics.recall:.4f}"])
+        writer.writerow(["f1", f"{row_metrics.f1:.4f}"])
+        writer.writerow(["documented_vulnerabilities", coverage.documented_count])
+        writer.writerow(["tested_vulnerabilities", coverage.tested_count])
+        writer.writerow(["coverage_rate", f"{coverage.coverage_rate:.4f}"])
+        writer.writerow(["detected_this_run", coverage.detected_count])
+        writer.writerow(["untested_vulnerabilities", "; ".join(coverage.untested)])
+        writer.writerow(
+            [
+                "tested_not_detected_vulnerabilities",
+                "; ".join(coverage.tested_not_detected),
+            ]
+        )
+        for severity in ("critical", "high", "medium", "low"):
+            writer.writerow([f"severity_{severity}", severity_counts.get(severity, 0)])
+        # Explicitly recorded as deferred/caveated rather than left as a silent
+        # gap -- see the module docstring and CLAUDE.md's Analysis & Metrics
+        # section. precision_f1_caveat travels with the CSV so the trivial-1.0
+        # artifact isn't mistaken for a real accuracy measurement if this file
+        # is used directly in the report without the stdout text.
+        writer.writerow(["false_positive_rate", "not_computed"])
+        writer.writerow(
+            ["precision_f1_caveat", "trivially_1.0_no_known_negative_cases"]
+        )
+        writer.writerow(["mann_whitney_u_chi_square_cohens_d", "deferred_stretch_goal"])
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--target",
+        default="vampi",
+        help="Target to analyse (e.g. vampi, crapi, juiceshop, dvga)",
+    )
+    args = parser.parse_args()
+
+    results = load_latest_results(args.target)
+    ground_truth = load_ground_truth(args.target)
+    if not ground_truth:
+        raise SystemExit(
+            f"No config/ground_truth.yaml entries found for target '{args.target}'"
+        )
+
+    row_metrics = compute_row_level_metrics(args.target, results)
+    coverage = compute_vulnerability_coverage(args.target, results, ground_truth)
+    confirmed_findings = [
+        r for r in results if r.assertion_role in FINDING_ROLES and not r.passed
+    ]
+    severity_counts = severity_distribution(confirmed_findings)
+
+    _print_summary(args.target, row_metrics, coverage, severity_counts)
+
+    output_path = ANALYSIS_OUTPUT_ROOT / f"{args.target}_summary.csv"
+    _write_summary_csv(output_path, args.target, row_metrics, coverage, severity_counts)
+    print(f"\nWritten to {output_path.relative_to(REPO_ROOT)}")
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    main()

@@ -1,0 +1,45 @@
+vampi:
+  - vulnerability: "Broken Object Level Authorization"
+    owasp_category: "API1:2023 Broken Object Level Authorization"
+    test_names: ["bola_book_secret_access"]
+    tested: true
+
+  - vulnerability: "SQL Injection"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: ["sqli_user_lookup"]
+    tested: true
+
+  - vulnerability: "JWT authentication bypass via weak signing key"
+    owasp_category: "API2:2023 Broken Authentication"
+    test_names: ["jwt_weak_signing_bypass"]
+    tested: true
+
+  - vulnerability: "Excessive Data Exposure through debug endpoint"
+    owasp_category: "API3:2023 Excessive Data Exposure"
+    test_names: ["vampi_debug_endpoint_exposure"]
+    tested: true
+
+  - vulnerability: "Lack of Resources & Rate Limiting"
+    owasp_category: "API4:2023 Unrestricted Resource Consumption"
+    test_names: ["login_brute_force_rate_limit"]
+    tested: true
+
+  - vulnerability: "Unauthorized Password Change"
+    owasp_category: "API1:2023 Broken Object Level Authorization"
+    test_names: []
+    tested: false
+
+  - vulnerability: "Mass Assignment"
+    owasp_category: "API3:2023 Broken Object Property Level Authorization"
+    test_names: []
+    tested: false
+
+  - vulnerability: "User and Password Enumeration"
+    owasp_category: "API2:2023 Broken Authentication"
+    test_names: []
+    tested: false
+
+  - vulnerability: "RegexDOS (Denial of Service)"
+    owasp_category: "API4:2023 Unrestricted Resource Consumption"
+    test_names: []
+    tested: false
