@@ -18,7 +18,12 @@ import requests
 
 from src.utils.dvga_client import DVGAClient
 from src.utils.results_logger import RunLogger
-from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
+from src.vulnerabilities.base import (
+    AssertionRole,
+    Severity,
+    VulnerabilityResult,
+    VulnerabilityTest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +96,7 @@ class DeepNestingDoSTest(VulnerabilityTest):
             ),
             request_summary=f"POST /graphql query={shallow_query!r} (hard mode)",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_hard_mode_rejects_deep_query(
@@ -113,6 +119,7 @@ class DeepNestingDoSTest(VulnerabilityTest):
             ),
             request_summary="POST /graphql query=<deep_query> (hard mode)",
             response_summary=f"HTTP {resp.status_code}; message={message!r}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_easy_mode_executes_deep_query(
@@ -236,6 +243,7 @@ class BatchQueryDoSTest(VulnerabilityTest):
             ),
             request_summary=f"POST /graphql batch(n={control_size}) query={probe_query!r}",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_oversized_batch_accepted_unchecked(

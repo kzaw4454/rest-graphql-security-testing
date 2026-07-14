@@ -15,7 +15,12 @@ from src.utils.crapi_client import CrAPIClient
 from src.utils.juiceshop_client import JuiceShopClient
 from src.utils.results_logger import RunLogger
 from src.utils.vampi_client import VAmPIClient
-from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
+from src.vulnerabilities.base import (
+    AssertionRole,
+    Severity,
+    VulnerabilityResult,
+    VulnerabilityTest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +139,7 @@ class BOLABookAccessTest(VulnerabilityTest):
             evidence=evidence,
             request_summary=f"GET {path} as_user=None",
             response_summary=f"HTTP {resp.status_code}; secret_leaked={leaked_secret}",
+            assertion_role=AssertionRole.CONTROL,
             owner_role="victim",
             requester_role="unauthenticated",
             book_title=owner_book,
@@ -243,6 +249,7 @@ class BOLABasketAccessTest(VulnerabilityTest):
             evidence=evidence,
             request_summary=f"GET {path} as_user=None",
             response_summary=f"HTTP {resp.status_code}; basket_leaked={leaked}",
+            assertion_role=AssertionRole.CONTROL,
             owner_role="victim",
             requester_role="unauthenticated",
             basket_id=owner_bid,
@@ -305,6 +312,7 @@ class BOLAVehicleLocationAccessTest(VulnerabilityTest):
 
         credentials = self.client.fetch_welcome_credentials(victim_email)
         if credentials is None:
+            # Setup-failure fallback, not a security-behavior baseline.
             return [
                 self._result(
                     passed=True,
@@ -316,12 +324,14 @@ class BOLAVehicleLocationAccessTest(VulnerabilityTest):
                     ),
                     request_summary="GET mailhog search (victim welcome email)",
                     response_summary="no matching email found",
+                    assertion_role=AssertionRole.CONTROL,
                 )
             ]
         vin, pincode = credentials
 
         add_resp = self.client.add_vehicle(vin, pincode, as_user="victim")
         if add_resp.status_code != 200:
+            # Setup-failure fallback, not a security-behavior baseline.
             return [
                 self._result(
                     passed=True,
@@ -332,11 +342,13 @@ class BOLAVehicleLocationAccessTest(VulnerabilityTest):
                     ),
                     request_summary="POST add_vehicle as_user='victim'",
                     response_summary=f"HTTP {add_resp.status_code}",
+                    assertion_role=AssertionRole.CONTROL,
                 )
             ]
 
         vehicle_id = self._discover_vehicle_id(vin)
         if vehicle_id is None:
+            # Setup-failure fallback, not a security-behavior baseline.
             return [
                 self._result(
                     passed=True,
@@ -347,6 +359,7 @@ class BOLAVehicleLocationAccessTest(VulnerabilityTest):
                     ),
                     request_summary="GET vehicles as_user='victim'",
                     response_summary="vehicle not found in list",
+                    assertion_role=AssertionRole.CONTROL,
                 )
             ]
 
@@ -388,6 +401,7 @@ class BOLAVehicleLocationAccessTest(VulnerabilityTest):
             ),
             request_summary=f"GET vehicle/{vehicle_id}/location as_user='victim'",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_cross_user_access(
@@ -445,6 +459,7 @@ class BOLAVehicleLocationAccessTest(VulnerabilityTest):
             evidence=evidence,
             request_summary=f"GET vehicle/{vehicle_id}/location as_user=None",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     @staticmethod
@@ -484,6 +499,7 @@ class BOLAOrderAccessTest(VulnerabilityTest):
         order_resp = self.client.create_order(self.product_id, 1, as_user="victim")
         order_id = self._extract_order_id(order_resp)
         if order_id is None:
+            # Setup-failure fallback, not a security-behavior baseline.
             return [
                 self._result(
                     passed=True,
@@ -494,6 +510,7 @@ class BOLAOrderAccessTest(VulnerabilityTest):
                     ),
                     request_summary="POST orders as_user='victim'",
                     response_summary=f"HTTP {order_resp.status_code}",
+                    assertion_role=AssertionRole.CONTROL,
                 )
             ]
 
@@ -535,6 +552,7 @@ class BOLAOrderAccessTest(VulnerabilityTest):
             ),
             request_summary="GET orders/all as_user='attacker'",
             response_summary=f"HTTP {resp.status_code}; count={own_order_count!r}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_cross_user_access(
@@ -572,9 +590,11 @@ class BOLAOrderAccessTest(VulnerabilityTest):
     def _test_unauthenticated_access(
         self, order_id: int, victim_email: str
     ) -> VulnerabilityResult:
-        """Control case: same object, no token at all. Unlike the
+        """Written as a control checking auth is required, but its failure
+        reveals a second, more severe, in-scope finding distinct from the
+        BOLA/ownership mechanism this module primarily tests: unlike the
         vehicle-location route, this endpoint enforces no authentication
-        either, so an unauthenticated caller succeeds too.
+        at all, so an unauthenticated caller succeeds too.
         """
         resp = self.client.get_order(order_id, as_user=None)
         leaked = self._response_reveals_owner(resp, victim_email)
@@ -589,6 +609,7 @@ class BOLAOrderAccessTest(VulnerabilityTest):
             ),
             request_summary=f"GET orders/{order_id} as_user=None",
             response_summary=f"HTTP {resp.status_code}; owner_leaked={leaked}",
+            assertion_role=AssertionRole.ADJACENT,
             owner_role="victim",
             requester_role="unauthenticated",
             order_id=order_id,

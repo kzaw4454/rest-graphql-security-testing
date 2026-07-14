@@ -11,7 +11,12 @@ import requests
 
 from src.utils.dvga_client import DVGAClient
 from src.utils.results_logger import RunLogger
-from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
+from src.vulnerabilities.base import (
+    AssertionRole,
+    Severity,
+    VulnerabilityResult,
+    VulnerabilityTest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +70,7 @@ class JWTTokenForgeTest(VulnerabilityTest):
             ),
             request_summary="query Me(token) as operator's own token",
             response_summary=f"HTTP {resp.status_code}; username={me.get('username')!r}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_forged_admin_token(self) -> VulnerabilityResult:
@@ -147,6 +153,7 @@ class GraphiQLInterfaceProtectionBypassTest(VulnerabilityTest):
             ),
             request_summary=f"POST {cfg.get('graphiql_path', '/graphiql')} query (server-set cookie)",
             response_summary=f"HTTP {resp.status_code}; blocked={blocked}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_cookie_bypass(self) -> VulnerabilityResult:
@@ -221,6 +228,7 @@ class QueryDenyListBypassTest(VulnerabilityTest):
             ),
             request_summary=f"POST /graphql query={denied_query!r}",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_bypass_query_succeeds(self) -> VulnerabilityResult:

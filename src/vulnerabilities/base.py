@@ -23,6 +23,12 @@ class Severity(str, Enum):
     CRITICAL = "critical"
 
 
+class AssertionRole(str, Enum):
+    DETECTION = "detection"  # tests the documented, in-scope vulnerability
+    CONTROL = "control"  # baseline expectation; failure here is not the target vuln
+    ADJACENT = "adjacent"  # control that failed and IS itself a real, separate, in-scope finding
+
+
 @dataclass
 class VulnerabilityResult:
     """
@@ -38,6 +44,7 @@ class VulnerabilityResult:
     evidence: str  # human-readable description of what was observed
     request_summary: Optional[str] = None  # e.g. method + path, redacted of secrets
     response_summary: Optional[str] = None  # e.g. status code + relevant snippet
+    assertion_role: AssertionRole = AssertionRole.DETECTION
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -72,6 +79,7 @@ class VulnerabilityTest(ABC):
         evidence: str,
         request_summary: Optional[str] = None,
         response_summary: Optional[str] = None,
+        assertion_role: AssertionRole = AssertionRole.DETECTION,
         **extra: Any,
     ) -> VulnerabilityResult:
         """Convenience factory for subclasses not to repeat boilerplate fields."""
@@ -85,5 +93,6 @@ class VulnerabilityTest(ABC):
             evidence=evidence,
             request_summary=request_summary,
             response_summary=response_summary,
+            assertion_role=assertion_role,
             extra=extra,
         )

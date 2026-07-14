@@ -20,7 +20,12 @@ import requests
 
 from src.utils.dvga_client import DVGAClient
 from src.utils.results_logger import RunLogger
-from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
+from src.vulnerabilities.base import (
+    AssertionRole,
+    Severity,
+    VulnerabilityResult,
+    VulnerabilityTest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +86,7 @@ class IntrospectionExposureTest(VulnerabilityTest):
             ),
             request_summary=f"POST /graphql query={probe_query!r} (hard mode)",
             response_summary=f"HTTP {resp.status_code}; blocked={blocked}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_easy_mode_allows_introspection(
@@ -165,6 +171,7 @@ class FieldSuggestionInfoDisclosureTest(VulnerabilityTest):
             ),
             request_summary=f"POST /graphql query={valid_query!r} (hard mode)",
             response_summary=f"HTTP {resp.status_code}; errors={errors!r}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_misspelled_field_leaks_suggestion(

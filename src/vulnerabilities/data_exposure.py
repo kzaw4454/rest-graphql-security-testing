@@ -12,7 +12,12 @@ import requests
 from src.utils.juiceshop_client import JuiceShopClient
 from src.utils.results_logger import RunLogger
 from src.utils.vampi_client import VAmPIClient
-from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
+from src.vulnerabilities.base import (
+    AssertionRole,
+    Severity,
+    VulnerabilityResult,
+    VulnerabilityTest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +172,7 @@ class ExcessiveUserDataExposureTest(VulnerabilityTest):
             evidence=evidence,
             request_summary=f"GET {path} as_user=None",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
 

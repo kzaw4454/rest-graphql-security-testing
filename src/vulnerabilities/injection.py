@@ -23,7 +23,12 @@ import requests
 from src.utils.crapi_client import CrAPIClient
 from src.utils.results_logger import RunLogger
 from src.utils.vampi_client import VAmPIClient
-from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
+from src.vulnerabilities.base import (
+    AssertionRole,
+    Severity,
+    VulnerabilityResult,
+    VulnerabilityTest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +124,7 @@ class SQLiUserLookupTest(VulnerabilityTest):
                 ),
                 request_summary=f"GET {path} as_user=None",
                 response_summary="connection failed",
+                assertion_role=AssertionRole.CONTROL,
             )
 
         unexpected_match = resp.status_code == 200
@@ -131,6 +137,7 @@ class SQLiUserLookupTest(VulnerabilityTest):
             ),
             request_summary=f"GET {path} as_user=None",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_error_based(self, payload: str) -> VulnerabilityResult:
@@ -397,6 +404,7 @@ class NoSQLiCouponValidateTest(VulnerabilityTest):
                 ),
                 request_summary=f"POST validate-coupon {body!r} as_user='attacker'",
                 response_summary="connection failed",
+                assertion_role=AssertionRole.CONTROL,
             )
 
         unexpected_match = resp.status_code == 200
@@ -409,6 +417,7 @@ class NoSQLiCouponValidateTest(VulnerabilityTest):
             ),
             request_summary=f"POST validate-coupon {body!r} as_user='attacker'",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_unauthenticated_rejected(self) -> VulnerabilityResult:
@@ -427,6 +436,7 @@ class NoSQLiCouponValidateTest(VulnerabilityTest):
                 evidence="Unauthenticated request failed at the transport level — inconclusive.",
                 request_summary=f"POST validate-coupon {body!r} as_user=None",
                 response_summary="connection failed",
+                assertion_role=AssertionRole.CONTROL,
             )
 
         rejected = resp.status_code == 401
@@ -450,6 +460,7 @@ class NoSQLiCouponValidateTest(VulnerabilityTest):
             evidence=evidence,
             request_summary=f"POST validate-coupon {body!r} as_user=None",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_operator_payload(self, payload: Any) -> VulnerabilityResult:
@@ -579,6 +590,7 @@ class SQLiApplyCouponTest(VulnerabilityTest):
                 ),
                 request_summary=f"POST apply_coupon coupon_code={control_code!r} as_user='attacker'",
                 response_summary="connection failed",
+                assertion_role=AssertionRole.CONTROL,
             )
 
         data = self._parse_json(resp) or {}
@@ -598,6 +610,7 @@ class SQLiApplyCouponTest(VulnerabilityTest):
             ),
             request_summary=f"POST apply_coupon coupon_code={control_code!r} as_user='attacker'",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_unauthenticated_rejected(self, payload: str) -> VulnerabilityResult:
@@ -610,6 +623,7 @@ class SQLiApplyCouponTest(VulnerabilityTest):
                 evidence="Unauthenticated request failed at the transport level — inconclusive.",
                 request_summary=f"POST apply_coupon coupon_code={payload!r} as_user=None",
                 response_summary="connection failed",
+                assertion_role=AssertionRole.CONTROL,
                 payload=payload,
             )
 
@@ -634,6 +648,7 @@ class SQLiApplyCouponTest(VulnerabilityTest):
             evidence=evidence,
             request_summary=f"POST apply_coupon coupon_code={payload!r} as_user=None",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
             payload=payload,
         )
 
@@ -719,6 +734,7 @@ class SQLiApplyCouponTest(VulnerabilityTest):
     def _test_tautology(self, payload: str) -> VulnerabilityResult:
         applied_code = self._discover_and_apply_real_coupon()
         if applied_code is None:
+            # Setup-failure fallback, not a security-behavior baseline.
             return self._result(
                 passed=True,
                 severity=Severity.LOW,
@@ -730,6 +746,7 @@ class SQLiApplyCouponTest(VulnerabilityTest):
                 ),
                 request_summary="POST apply_coupon (setup phase)",
                 response_summary="setup failed",
+                assertion_role=AssertionRole.CONTROL,
                 payload=payload,
             )
 

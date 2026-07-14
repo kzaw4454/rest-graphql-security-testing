@@ -19,7 +19,12 @@ from src.utils.crapi_client import CrAPIClient
 from src.utils.results_logger import RunLogger
 from src.utils.vampi_client import VAmPIClient
 from src.vulnerabilities.authorization import BOOKS_PATH
-from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
+from src.vulnerabilities.base import (
+    AssertionRole,
+    Severity,
+    VulnerabilityResult,
+    VulnerabilityTest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +62,7 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
 
         book_title = self._discover_existing_book_title()
         if book_title is None:
+            # Setup-failure fallback, not a security-behavior baseline.
             results.append(
                 self._result(
                     passed=True,
@@ -68,6 +74,7 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
                     ),
                     request_summary=f"GET {BOOKS_PATH}",
                     response_summary="no books returned",
+                    assertion_role=AssertionRole.CONTROL,
                 )
             )
             return results
@@ -143,6 +150,7 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
             evidence=evidence,
             request_summary="POST /users/v1/login as_user='attacker'",
             response_summary=f"token alg={alg!r}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_weak_secret_forgery(self, book_title: str) -> VulnerabilityResult:
@@ -201,6 +209,7 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
             evidence=evidence,
             request_summary=f"GET {path} with forged token (control secret, sub='admin')",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_alg_none_rejected(self, book_title: str) -> VulnerabilityResult:
@@ -230,6 +239,7 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
             evidence=evidence,
             request_summary=f"GET {path} with alg='none' token, sub='admin'",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
 
@@ -302,6 +312,7 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
 
         results = [self._test_rs256_algorithm_confirmed()]
         if self.default_signing_key is None:
+            # Setup-failure fallback, not a security-behavior baseline.
             results.append(
                 self._result(
                     passed=True,
@@ -312,6 +323,7 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
                     ),
                     request_summary=None,
                     response_summary=None,
+                    assertion_role=AssertionRole.CONTROL,
                 )
             )
             return results
@@ -376,6 +388,7 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
             evidence=evidence,
             request_summary="POST /identity/api/auth/login as_user='victim'",
             response_summary=f"token alg={alg!r} kid={kid!r}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_dashboard_alg_none_forgery(
@@ -440,6 +453,7 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
             evidence=evidence,
             request_summary=f"GET {self.dashboard_path} with alg='none' token, sub=nonexistent email",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_vehicles_default_key_forgery(
@@ -504,6 +518,7 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
             evidence=evidence,
             request_summary=f"GET {self.vehicles_path} with forged token (unrelated key, sub=victim's email)",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     @staticmethod

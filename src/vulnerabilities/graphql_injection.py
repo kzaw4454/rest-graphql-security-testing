@@ -20,7 +20,12 @@ import requests
 
 from src.utils.dvga_client import DVGAClient
 from src.utils.results_logger import RunLogger
-from src.vulnerabilities.base import Severity, VulnerabilityResult, VulnerabilityTest
+from src.vulnerabilities.base import (
+    AssertionRole,
+    Severity,
+    VulnerabilityResult,
+    VulnerabilityTest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +63,8 @@ class PastesFilterSQLiTest(VulnerabilityTest):
         canary_title = self._setup_private_canary_paste()
         if canary_title is None:
             return [
+                # Setup-failure fallback, not a security-behavior baseline — tagged
+                # CONTROL since it is not a detection either way.
                 self._result(
                     passed=True,
                     severity=Severity.LOW,
@@ -67,6 +74,7 @@ class PastesFilterSQLiTest(VulnerabilityTest):
                     ),
                     request_summary="mutation createPaste (setup phase)",
                     response_summary="setup failed",
+                    assertion_role=AssertionRole.CONTROL,
                 )
             ]
 
@@ -113,6 +121,7 @@ class PastesFilterSQLiTest(VulnerabilityTest):
             ),
             request_summary=f"query pastes(public=true, filter={control_filter!r})",
             response_summary=f"HTTP {resp.status_code}; titles={titles!r}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_tautology_bypasses_public_scope(
@@ -196,6 +205,7 @@ class SystemDebugCommandInjectionTest(VulnerabilityTest):
             ),
             request_summary="query systemDebug(arg='aux')",
             response_summary=f"HTTP {resp.status_code}",
+            assertion_role=AssertionRole.CONTROL,
         )
 
     def _test_command_injection(self) -> VulnerabilityResult:
