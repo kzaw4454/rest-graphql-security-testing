@@ -74,12 +74,37 @@ class VulnerabilityCoverage:
     tested_not_detected: list[str] = field(default_factory=list)
 
 
-def _latest_run_jsonl(category_dir: Path) -> Optional[Path]:
+def _latest_rows_by_test_name(category_dir: Path) -> list[dict[str, Any]]:
     """
-    Pick the most recent run's .jsonl in an owasp_category folder
+    Read every .jsonl file in an owasp_category folder, then for each
+    distinct test_name keep only the rows from that test_name's own latest
+    run_id. A folder can hold output from several test_names logged at
+    different times (e.g. DVGA's api8_2023_security_misconfiguration holds
+    rows from graphql_auth_bypass.py, graphql_injection.py, and
+    graphql_info_disclosure.py, run separately), so picking a single newest
+    file for the whole folder would silently drop older test_names' rows.
     """
-    jsonl_files = sorted(category_dir.glob("*.jsonl"))
-    return jsonl_files[-1] if jsonl_files else None
+    records_by_test_name: dict[str, list[dict[str, Any]]] = {}
+    latest_run_id_by_test_name: dict[str, str] = {}
+
+    for jsonl_file in sorted(category_dir.glob("*.jsonl")):
+        with jsonl_file.open("r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                record = json.loads(line)
+                test_name = record["test_name"]
+                run_id = record["run_id"]
+                records_by_test_name.setdefault(test_name, []).append(record)
+                if run_id > latest_run_id_by_test_name.get(test_name, ""):
+                    latest_run_id_by_test_name[test_name] = run_id
+
+    latest_rows: list[dict[str, Any]] = []
+    for test_name, records in records_by_test_name.items():
+        latest_run_id = latest_run_id_by_test_name[test_name]
+        latest_rows.extend(r for r in records if r["run_id"] == latest_run_id)
+    return latest_rows
 
 
 def _target_dir(target: str, architecture: Optional[str]) -> Path:
@@ -100,8 +125,8 @@ def load_latest_results(
     target: str, architecture: Optional[str] = None
 ) -> list[LoggedResult]:
     """
-    Load the most recent run's rows for every owasp_category folder under
-    results/logs/<architecture>/<target>/.
+    Load each test_name's latest-run rows for every owasp_category folder
+    under results/logs/<architecture>/<target>/.
     """
     target_dir = _target_dir(target, architecture)
 
@@ -109,28 +134,20 @@ def load_latest_results(
     for category_dir in sorted(target_dir.iterdir()):
         if not category_dir.is_dir():
             continue  # skip *.manifest.json files sitting alongside category folders
-        latest = _latest_run_jsonl(category_dir)
-        if latest is None:
-            continue
-        with latest.open("r") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                record = json.loads(line)
-                results.append(
-                    LoggedResult(
-                        test_name=record["test_name"],
-                        owasp_category=record["owasp_category"],
-                        architecture=record["architecture"],
-                        target=record["target"],
-                        passed=record["passed"],
-                        severity=record["severity"],
-                        assertion_role=record["assertion_role"],
-                        run_id=record["run_id"],
-                        timestamp=record["timestamp"],
-                    )
+        for record in _latest_rows_by_test_name(category_dir):
+            results.append(
+                LoggedResult(
+                    test_name=record["test_name"],
+                    owasp_category=record["owasp_category"],
+                    architecture=record["architecture"],
+                    target=record["target"],
+                    passed=record["passed"],
+                    severity=record["severity"],
+                    assertion_role=record["assertion_role"],
+                    run_id=record["run_id"],
+                    timestamp=record["timestamp"],
                 )
+            )
     return results
 
 

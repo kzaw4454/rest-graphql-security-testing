@@ -179,3 +179,142 @@ crapi:
     test_names: []
     tested: false
     out_of_scope: false
+
+dvga:
+  - vulnerability: "JWT Token Forgery (Authorization Bypass)"
+    owasp_category: "API2:2023 Broken Authentication"
+    test_names: ["jwt_token_forge"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "GraphiQL Interface Protection Bypass (Authorization Bypass)"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: ["graphiql_interface_protection_bypass"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "Query Deny List Bypass (Authorization Bypass)"
+    owasp_category: "API5:2023 Broken Function Level Authorization"
+    test_names: ["query_deny_list_bypass"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "Pastes Filter SQL Injection"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: ["pastes_filter_sqli"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "System Debug Command Injection"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: ["system_debug_command_injection"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "Import Paste SSRF via curl"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Injection #1"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Introspection Exposure"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: ["introspection_exposure"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "Field Suggestion Information Disclosure"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: ["field_suggestion_info_disclosure"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "Information Disclosure #1"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Information Disclosure #2"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Information Disclosure #3"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Deep Nesting Denial of Service"
+    owasp_category: "API4:2023 Unrestricted Resource Consumption"
+    test_names: ["deep_nesting_dos"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "Batch Query Denial of Service"
+    owasp_category: "API4:2023 Unrestricted Resource Consumption"
+    test_names: ["batch_query_dos"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "Denial of Service #1"
+    owasp_category: "API4:2023 Unrestricted Resource Consumption"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Denial of Service #2"
+    owasp_category: "API4:2023 Unrestricted Resource Consumption"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Denial of Service #3"
+    owasp_category: "API4:2023 Unrestricted Resource Consumption"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Code Execution #1"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Code Execution #2"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Reconnaissance #1"
+    owasp_category: "API9:2023 Improper Inventory Management"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Reconnaissance #2"
+    owasp_category: "API9:2023 Improper Inventory Management"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Miscellaneous #1"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Miscellaneous #2"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: []
+    tested: false
+    out_of_scope: false
