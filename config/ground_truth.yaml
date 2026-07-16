@@ -318,3 +318,25 @@ dvga:
     test_names: []
     tested: false
     out_of_scope: false
+
+juiceshop:
+  - vulnerability: "BOLA/IDOR - Basket Access"
+    owasp_category: "API1:2023 Broken Object Level Authorization"
+    test_names: ["bola_basket_access"]
+    tested: true
+    out_of_scope: false
+    instance_count: 1
+
+  - vulnerability: "Excessive Data Exposure - Authentication Details"
+    owasp_category: "API3:2023 Excessive Data Exposure"
+    test_names: ["excessive_user_data_exposure"]
+    tested: true
+    out_of_scope: false
+    instance_count: 1
+
+  - vulnerability: "Remaining Juice Shop challenges (UI/DOM-only, out of scope)"
+    owasp_category: "Multiple (BOLA/IDOR, Broken Auth, Rate Limiting, XSS via API, Excessive Data Exposure)"
+    test_names: []
+    tested: false
+    out_of_scope: true
+    instance_count: 109

@@ -155,14 +155,16 @@ def load_ground_truth(
     target: str, path: Path = GROUND_TRUTH_PATH
 ) -> list[dict[str, Any]]:
     """
-    Documented vulnerabilities for a target. `out_of_scope` defaults to False
-    for entries predating the field, rather than requiring a backfill.
+    Documented vulnerabilities for a target. `out_of_scope` and
+    `instance_count` default to False/1 for entries predating those fields,
+    rather than requiring a backfill.
     """
     with path.open("r") as f:
         data = yaml.safe_load(f) or {}
     entries = data.get(target, [])
     for entry in entries:
         entry.setdefault("out_of_scope", False)
+        entry.setdefault("instance_count", 1)
     return entries
 
 
@@ -213,8 +215,8 @@ def compute_vulnerability_coverage(
         if r.assertion_role in FINDING_ROLES and not r.passed
     }
 
-    documented_count = len(ground_truth)
-    tested_count = sum(1 for v in ground_truth if v["tested"])
+    documented_count = sum(v["instance_count"] for v in ground_truth)
+    tested_count = sum(v["instance_count"] for v in ground_truth if v["tested"])
     untested = [
         v["vulnerability"]
         for v in ground_truth
@@ -227,8 +229,10 @@ def compute_vulnerability_coverage(
     ]
 
     in_scope_ground_truth = [v for v in ground_truth if not v["out_of_scope"]]
-    in_scope_documented_count = len(in_scope_ground_truth)
-    in_scope_tested_count = sum(1 for v in in_scope_ground_truth if v["tested"])
+    in_scope_documented_count = sum(v["instance_count"] for v in in_scope_ground_truth)
+    in_scope_tested_count = sum(
+        v["instance_count"] for v in in_scope_ground_truth if v["tested"]
+    )
 
     tested_not_detected = []
     detected_count = 0
