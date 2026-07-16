@@ -67,7 +67,10 @@ class VulnerabilityCoverage:
     tested_count: int
     detected_count: int
     coverage_rate: float
+    in_scope_documented_count: int
+    in_scope_coverage_rate: float
     untested: list[str] = field(default_factory=list)
+    untested_out_of_scope: list[str] = field(default_factory=list)
     tested_not_detected: list[str] = field(default_factory=list)
 
 
@@ -134,10 +137,16 @@ def load_latest_results(
 def load_ground_truth(
     target: str, path: Path = GROUND_TRUTH_PATH
 ) -> list[dict[str, Any]]:
-    """Documented vulnerabilities for a target."""
+    """
+    Documented vulnerabilities for a target. `out_of_scope` defaults to False
+    for entries predating the field, rather than requiring a backfill.
+    """
     with path.open("r") as f:
         data = yaml.safe_load(f) or {}
-    return data.get(target, [])
+    entries = data.get(target, [])
+    for entry in entries:
+        entry.setdefault("out_of_scope", False)
+    return entries
 
 
 def compute_row_level_metrics(
@@ -189,7 +198,20 @@ def compute_vulnerability_coverage(
 
     documented_count = len(ground_truth)
     tested_count = sum(1 for v in ground_truth if v["tested"])
-    untested = [v["vulnerability"] for v in ground_truth if not v["tested"]]
+    untested = [
+        v["vulnerability"]
+        for v in ground_truth
+        if not v["tested"] and not v["out_of_scope"]
+    ]
+    untested_out_of_scope = [
+        v["vulnerability"]
+        for v in ground_truth
+        if not v["tested"] and v["out_of_scope"]
+    ]
+
+    in_scope_ground_truth = [v for v in ground_truth if not v["out_of_scope"]]
+    in_scope_documented_count = len(in_scope_ground_truth)
+    in_scope_tested_count = sum(1 for v in in_scope_ground_truth if v["tested"])
 
     tested_not_detected = []
     detected_count = 0
@@ -207,7 +229,14 @@ def compute_vulnerability_coverage(
         tested_count=tested_count,
         detected_count=detected_count,
         coverage_rate=(tested_count / documented_count) if documented_count else 0.0,
+        in_scope_documented_count=in_scope_documented_count,
+        in_scope_coverage_rate=(
+            (in_scope_tested_count / in_scope_documented_count)
+            if in_scope_documented_count
+            else 0.0
+        ),
         untested=untested,
+        untested_out_of_scope=untested_out_of_scope,
         tested_not_detected=tested_not_detected,
     )
 
@@ -248,13 +277,19 @@ def _print_summary(
     print()
 
     print("-- Vulnerability-level coverage (config/ground_truth.yaml) --")
-    print(f"Documented vulnerabilities: {coverage.documented_count}")
-    print(f"Tested vulnerabilities:     {coverage.tested_count}")
-    print(f"Coverage rate:              {coverage.coverage_rate:.4f}")
-    print(f"Detected this run:          {coverage.detected_count}")
+    print(f"Documented vulnerabilities:        {coverage.documented_count}")
+    print(f"In-scope documented vulnerabilities: {coverage.in_scope_documented_count}")
+    print(f"Tested vulnerabilities:            {coverage.tested_count}")
+    print(f"Coverage rate (all documented):   {coverage.coverage_rate:.4f}")
+    print(f"Coverage rate (in-scope only):     {coverage.in_scope_coverage_rate:.4f}")
+    print(f"Detected this run:                 {coverage.detected_count}")
     if coverage.untested:
-        print("Untested (no test module yet):")
+        print("Untested (in scope, no test module yet):")
         for name in coverage.untested:
+            print(f"  - {name}")
+    if coverage.untested_out_of_scope:
+        print("Excluded by design (out of scope):")
+        for name in coverage.untested_out_of_scope:
             print(f"  - {name}")
     if coverage.tested_not_detected:
         print("Tested but not detected in this run:")
@@ -295,10 +330,22 @@ def _write_summary_csv(
         writer.writerow(["recall", f"{row_metrics.recall:.4f}"])
         writer.writerow(["f1", f"{row_metrics.f1:.4f}"])
         writer.writerow(["documented_vulnerabilities", coverage.documented_count])
+        writer.writerow(
+            ["in_scope_documented_vulnerabilities", coverage.in_scope_documented_count]
+        )
         writer.writerow(["tested_vulnerabilities", coverage.tested_count])
-        writer.writerow(["coverage_rate", f"{coverage.coverage_rate:.4f}"])
+        writer.writerow(["coverage_rate_all_documented", f"{coverage.coverage_rate:.4f}"])
+        writer.writerow(
+            ["coverage_rate_in_scope_only", f"{coverage.in_scope_coverage_rate:.4f}"]
+        )
         writer.writerow(["detected_this_run", coverage.detected_count])
         writer.writerow(["untested_vulnerabilities", "; ".join(coverage.untested)])
+        writer.writerow(
+            [
+                "untested_out_of_scope_vulnerabilities",
+                "; ".join(coverage.untested_out_of_scope),
+            ]
+        )
         writer.writerow(
             [
                 "tested_not_detected_vulnerabilities",

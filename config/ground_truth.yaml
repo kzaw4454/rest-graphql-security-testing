@@ -3,43 +3,179 @@ vampi:
     owasp_category: "API1:2023 Broken Object Level Authorization"
     test_names: ["bola_book_secret_access"]
     tested: true
+    out_of_scope: false
 
   - vulnerability: "SQL Injection"
     owasp_category: "API8:2023 Security Misconfiguration"
     test_names: ["sqli_user_lookup"]
     tested: true
+    out_of_scope: false
 
   - vulnerability: "JWT authentication bypass via weak signing key"
     owasp_category: "API2:2023 Broken Authentication"
     test_names: ["jwt_weak_signing_bypass"]
     tested: true
+    out_of_scope: false
 
   - vulnerability: "Excessive Data Exposure through debug endpoint"
     owasp_category: "API3:2023 Excessive Data Exposure"
     test_names: ["vampi_debug_endpoint_exposure"]
     tested: true
+    out_of_scope: false
 
   - vulnerability: "Lack of Resources & Rate Limiting"
     owasp_category: "API4:2023 Unrestricted Resource Consumption"
     test_names: ["login_brute_force_rate_limit"]
     tested: true
+    out_of_scope: false
 
   - vulnerability: "Unauthorized Password Change"
     owasp_category: "API1:2023 Broken Object Level Authorization"
     test_names: []
     tested: false
+    out_of_scope: false
 
   - vulnerability: "Mass Assignment"
     owasp_category: "API3:2023 Broken Object Property Level Authorization"
     test_names: []
     tested: false
+    out_of_scope: false
 
   - vulnerability: "User and Password Enumeration"
     owasp_category: "API2:2023 Broken Authentication"
     test_names: []
     tested: false
+    out_of_scope: false
 
   - vulnerability: "RegexDOS (Denial of Service)"
     owasp_category: "API4:2023 Unrestricted Resource Consumption"
     test_names: []
     tested: false
+    out_of_scope: false
+
+crapi:
+  - vulnerability: "BOLA - Vehicle Location Access"
+    owasp_category: "API1:2023 Broken Object Level Authorization"
+    test_names: ["bola_vehicle_location_access"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "BOLA - Order Access"
+    owasp_category: "API1:2023 Broken Object Level Authorization"
+    test_names: ["bola_order_access"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "Unauthenticated Access"
+    owasp_category: "API1:2023 Broken Object Level Authorization"
+    test_names: ["bola_order_access"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "Broken User Authentication"
+    owasp_category: "API2:2023 Broken Authentication"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Excessive Data Exposure #1"
+    owasp_category: "API3:2023 Excessive Data Exposure"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Excessive Data Exposure #2"
+    owasp_category: "API3:2023 Excessive Data Exposure"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Lack of Resources & Rate Limiting"
+    owasp_category: "API4:2023 Unrestricted Resource Consumption"
+    test_names: ["crapi_login_brute_force_rate_limit"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "Broken Function Level Authorization"
+    owasp_category: "API5:2023 Broken Function Level Authorization"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Mass Assignment #1"
+    owasp_category: "API3:2023 Broken Object Property Level Authorization"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Mass Assignment #2"
+    owasp_category: "API3:2023 Broken Object Property Level Authorization"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Mass Assignment #3"
+    owasp_category: "API3:2023 Broken Object Property Level Authorization"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Server Side Request Forgery"
+    owasp_category: "API7:2023 Server Side Request Forgery"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "NoSQL Injection"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: ["nosqli_coupon_validate"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "SQL Injection"
+    owasp_category: "API8:2023 Security Misconfiguration"
+    test_names: ["sqli_apply_coupon"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "JWT Vulnerabilities"
+    owasp_category: "API2:2023 Broken Authentication"
+    test_names: ["jwt_signature_verification_bypass"]
+    tested: true
+    out_of_scope: false
+
+  - vulnerability: "LLM Vulnerabilities #1"
+    owasp_category: "API10:2023 Unsafe Consumption of APIs"
+    test_names: []
+    tested: false
+    out_of_scope: true
+
+  - vulnerability: "LLM Vulnerabilities #2"
+    owasp_category: "API10:2023 Unsafe Consumption of APIs"
+    test_names: []
+    tested: false
+    out_of_scope: true
+
+  - vulnerability: "LLM Vulnerabilities #3"
+    owasp_category: "API10:2023 Unsafe Consumption of APIs"
+    test_names: []
+    tested: false
+    out_of_scope: true
+
+  - vulnerability: "Other Secret Challenges #1"
+    owasp_category: "API9:2023 Improper Inventory Management"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Other Secret Challenges #2"
+    owasp_category: "API9:2023 Improper Inventory Management"
+    test_names: []
+    tested: false
+    out_of_scope: false
+
+  - vulnerability: "Other Secret Challenges #3"
+    owasp_category: "API9:2023 Improper Inventory Management"
+    test_names: []
+    tested: false
+    out_of_scope: false
