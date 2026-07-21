@@ -86,7 +86,7 @@ class BOLABookAccessTest(VulnerabilityTest):
         owner_secret: str,
         requester_role: str,
     ) -> VulnerabilityResult:
-        """One book, one owner, one *other* authenticated user's token."""
+        """One user's book is accessed using another user's auth token."""
         path = f"{BOOKS_PATH}/{owner_book}"
         resp = self.client.get(path, as_user=requester_role)
         leaked_secret = self._response_reveals_secret(resp, owner_secret)
@@ -116,10 +116,10 @@ class BOLABookAccessTest(VulnerabilityTest):
     def _test_unauthenticated_access(
         self, owner_book: str, owner_secret: str
     ) -> VulnerabilityResult:
-        """Control case: same object, no token at all. Documents whether the
-        endpoint enforces authentication in addition to (not) enforcing
-        ownership — useful context for the results table but not itself the
-        BOLA finding.
+        """
+        Control case: access of one user's book information with no token at all
+        Document whether the endpoint enforces authentication in addition to 
+        (not) enforcing ownership.
         """
         path = f"{BOOKS_PATH}/{owner_book}"
         resp = self.client.get(path)
@@ -157,7 +157,7 @@ class BOLABookAccessTest(VulnerabilityTest):
 
 
 def _fresh_synthetic_juiceshop_login(client: JuiceShopClient, role: str) -> None:
-    """Sign up and log in a brand-new synthetic identity for `role`."""
+    """Sign up and log in a new identity (Juice Shop test account) with `role`."""
     user = client.test_users[role]
     suffix = uuid.uuid4().hex[:10]
     user["email"] = f"{role}.{suffix}@juiceshop-test.local"
@@ -166,9 +166,7 @@ def _fresh_synthetic_juiceshop_login(client: JuiceShopClient, role: str) -> None
 
 
 class BOLABasketAccessTest(VulnerabilityTest):
-    """
-    Confirms whether Juice Shop enforces object-level ownership on baskets.
-    """
+    """Confirms whether Juice Shop enforces object-level ownership on baskets."""
 
     name = "bola_basket_access"
     owasp_category = "API1:2023 Broken Object Level Authorization"
@@ -197,7 +195,7 @@ class BOLABasketAccessTest(VulnerabilityTest):
     def _test_cross_user_access(
         self, owner_role: str, owner_bid: int, requester_role: str
     ) -> VulnerabilityResult:
-        """One basket, one owner, one *other* authenticated user's token."""
+        """Access one user's basket with another user's auth token."""
         resp = self.client.get_basket(owner_bid, as_user=requester_role)
         leaked = self._response_reveals_basket(resp, owner_bid)
 
@@ -229,6 +227,7 @@ class BOLABasketAccessTest(VulnerabilityTest):
         )
 
     def _test_unauthenticated_access(self, owner_bid: int) -> VulnerabilityResult:
+        """Control case: access basket with no token."""
         resp = self.client.get_basket(owner_bid, as_user=None)
         leaked = self._response_reveals_basket(resp, owner_bid)
 
@@ -257,6 +256,7 @@ class BOLABasketAccessTest(VulnerabilityTest):
 
     @staticmethod
     def _response_reveals_basket(resp: Any, expected_bid: int) -> bool:
+        """Check if the respose contains the specific basket data"""
         if resp.status_code != 200:
             return False
         try:
@@ -267,12 +267,12 @@ class BOLABasketAccessTest(VulnerabilityTest):
 
 
 def _fresh_synthetic_login(client: CrAPIClient, role: str) -> None:
-    """Sign up and log in a brand-new synthetic identity for `role`.
+    """
+    Sign up and log in a new identity (CrAPI test account) for `role`.
 
     crAPI enforces unique email *and* phone number per account and has no
     reseed endpoint, so each test run needs its own fresh identity rather
-    than reusing config's static test_users values, which would 403
-    ("already registered") on a second run.
+    than reusing config's static test_users values.
     """
     user = client.test_users[role]
     suffix = uuid.uuid4().hex[:10]
@@ -287,15 +287,12 @@ class BOLAVehicleLocationAccessTest(VulnerabilityTest):
     Confirms whether crAPI enforces object-level ownership on vehicle
     location lookups.
 
-    crapi-identity's welcome email (captured via MailHog in this test's
-    setup step) assigns every new account a VIN and pincode; adding that
+    crapi-identity's welcome email (captured via MailHog, fake mail server) 
+    assigns every new account a VIN and pincode; adding that
     vehicle produces a vehicle id. `GET /identity/api/v2/vehicle/{id}/
     location` accepts any authenticated user's token regardless of which
     account added that vehicle, returning the owner's GPS coordinates,
-    full name, and email. The community forum's public "recent posts"
-    feed also exposes other users' vehicle ids directly (each post's
-    author object includes a `vehicleid` field), so an attacker does not
-    even need to guess or enumerate ids to exploit this.
+    full name, and email.
     """
 
     name = "bola_vehicle_location_access"
@@ -306,6 +303,11 @@ class BOLAVehicleLocationAccessTest(VulnerabilityTest):
         self.client = client
 
     def run(self) -> list[VulnerabilityResult]:
+        """
+        Logs in fresh victim/attacker, pulls the victim's VIN/pincode 
+        from a captured "welcome email," registers a vehicle under 
+        the victim's account, finds its ID, then runs the checks.
+        """
         for role in ("victim", "attacker"):
             _fresh_synthetic_login(self.client, role)
         victim_email = self.client.test_users["victim"]["email"]
@@ -385,7 +387,8 @@ class BOLAVehicleLocationAccessTest(VulnerabilityTest):
     def _test_owner_access(
         self, vehicle_id: str, victim_email: str
     ) -> VulnerabilityResult:
-        """Control: the owner's own token must be able to read this data —
+        """
+        Control: the owner's own token must be able to read this data —
         otherwise the cross-user result below would be meaningless.
         """
         resp = self.client.get_vehicle_location(vehicle_id, as_user="victim")
@@ -407,7 +410,7 @@ class BOLAVehicleLocationAccessTest(VulnerabilityTest):
     def _test_cross_user_access(
         self, vehicle_id: str, victim_email: str
     ) -> VulnerabilityResult:
-        """One vehicle, one owner, one *other* authenticated user's token."""
+        """Access one user's vehicle information with another user's login."""
         resp = self.client.get_vehicle_location(vehicle_id, as_user="attacker")
         leaked = self._response_reveals_owner(resp, victim_email)
 
@@ -437,9 +440,9 @@ class BOLAVehicleLocationAccessTest(VulnerabilityTest):
         )
 
     def _test_unauthenticated_rejected(self, vehicle_id: str) -> VulnerabilityResult:
-        """Extra retest: unlike VAmPI's books endpoint, this route does
-        require some valid token — confirms the cross-user finding above
-        is a genuine ownership gap, not simply "no auth at all".
+        """
+        Control case: Confirms this endpoint at least requires some valid login
+        (unlike VAmPI's books endpoint).
         """
         resp = self.client.get_vehicle_location(vehicle_id, as_user=None)
         rejected = resp.status_code == 401
@@ -480,7 +483,7 @@ class BOLAOrderAccessTest(VulnerabilityTest):
     `GET /workshop/api/shop/orders/{id}` returns full order detail
     (purchaser email and phone number, product, transaction id) for a
     sequential integer order id with no ownership check and, unlike the
-    vehicle-location route above, no authentication requirement at all.
+    vehicle-location route above, no authentication is required.
     """
 
     name = "bola_order_access"
@@ -492,6 +495,10 @@ class BOLAOrderAccessTest(VulnerabilityTest):
         self.product_id: int = client.scan_config.get("shop_product_id", 1)
 
     def run(self) -> list[VulnerabilityResult]:
+        """
+        Logs in fresh victim/attacker, places an order as the victim, 
+        then runs the checks below.
+        """
         for role in ("victim", "attacker"):
             _fresh_synthetic_login(self.client, role)
         victim_email = self.client.test_users["victim"]["email"]
@@ -522,6 +529,7 @@ class BOLAOrderAccessTest(VulnerabilityTest):
 
     @staticmethod
     def _extract_order_id(resp: requests.Response) -> Optional[int]:
+        """Extracts order ID from the order."""
         if resp.status_code != 200:
             return None
         try:
@@ -530,8 +538,9 @@ class BOLAOrderAccessTest(VulnerabilityTest):
             return None
 
     def _test_attacker_has_no_orders_of_own(self) -> VulnerabilityResult:
-        """Baseline: confirms the attacker owns zero orders of their own,
-        so any order they can retrieve in the cross-user test below must
+        """
+        Baseline: confirms the attacker owns zero orders -
+        any order they can retrieve in the cross-user test below must
         belong to someone else.
         """
         resp = self.client.list_orders(as_user="attacker")
@@ -558,7 +567,7 @@ class BOLAOrderAccessTest(VulnerabilityTest):
     def _test_cross_user_access(
         self, order_id: int, victim_email: str
     ) -> VulnerabilityResult:
-        """One order, one owner, one *other* authenticated user's token."""
+        """One user tries to read another's order using their own login."""
         resp = self.client.get_order(order_id, as_user="attacker")
         leaked = self._response_reveals_owner(resp, victim_email)
 
@@ -590,7 +599,9 @@ class BOLAOrderAccessTest(VulnerabilityTest):
     def _test_unauthenticated_access(
         self, order_id: int, victim_email: str
     ) -> VulnerabilityResult:
-        """Written as a control checking auth is required, but its failure
+        """
+        Adjacent case:
+        Written as a control checking auth is required, but its failure
         reveals a second, more severe, in-scope finding distinct from the
         BOLA/ownership mechanism this module primarily tests: unlike the
         vehicle-location route, this endpoint enforces no authentication
@@ -617,6 +628,7 @@ class BOLAOrderAccessTest(VulnerabilityTest):
 
     @staticmethod
     def _response_reveals_owner(resp: requests.Response, expected_email: str) -> bool:
+        """Checks response for the expected owner's email."""
         if resp.status_code != 200:
             return False
         try:
