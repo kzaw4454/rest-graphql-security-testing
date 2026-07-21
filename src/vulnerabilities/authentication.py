@@ -34,15 +34,7 @@ FORGED_TOKEN_TTL_SECONDS = 3600
 class JWTWeakSigningBypassTest(VulnerabilityTest):
     """
     Confirms whether VAmPI's HS256 auth tokens can be forged against the
-    hardcoded Flask SECRET_KEY, without ever completing a real login.
-
-    config.py sets `vuln_app.app.config['SECRET_KEY'] = 'random'` as a
-    fixed literal, and models/user_model.py signs and verifies every token
-    with that same value via `jwt.encode(..., algorithm='HS256')` /
-    `jwt.decode(..., algorithms=["HS256"])`. Since PyJWT's `decode()` call
-    restricts to `algorithms=["HS256"]`, an unsigned `alg: none` token is a
-    separate, independently-tested root cause rather than a variant of the
-    weak-secret finding.
+    hardcoded Flask SECRET_KEY, without a real login.
     """
 
     name = "jwt_weak_signing_bypass"
@@ -57,6 +49,10 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
         )
 
     def run(self) -> list[VulnerabilityResult]:
+        """
+        Seeds the database, finds a real book to target, 
+        then calls the checks.
+        """
         self.client.seed_database()
         results = [self._test_hs256_algorithm_confirmed()]
 
@@ -87,7 +83,8 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
     # -- setup ---------------------------------------------------------
 
     def _discover_existing_book_title(self) -> Optional[str]:
-        """`GET /books/v1` requires no auth and lists every user's books
+        """
+        `GET /books/v1` requires no auth and lists every user's books
         (see authorization.py's BOLA finding) — used here only to obtain a
         real book title to target with a forged token.
         """
@@ -105,6 +102,7 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
 
     @staticmethod
     def _forge_token(secret: str, sub: str) -> str:
+        """Builds a fake login token with secret and defined algorithm."""
         now = datetime.now(timezone.utc)
         payload = {
             "exp": now + timedelta(seconds=FORGED_TOKEN_TTL_SECONDS),
@@ -115,6 +113,7 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
 
     @staticmethod
     def _forge_alg_none_token(sub: str) -> str:
+        """Builds a fake login token without any signature (alg=none)."""
         now = datetime.now(timezone.utc)
         payload = {
             "exp": now + timedelta(seconds=FORGED_TOKEN_TTL_SECONDS),
@@ -126,9 +125,10 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
     # -- checks ----------------------------------------------------------
 
     def _test_hs256_algorithm_confirmed(self) -> VulnerabilityResult:
-        """Baseline: decode a real, server-issued token's header (without
+        """
+        Baseline: decodes a real, server-issued token's header (without
         verifying its signature) to confirm HS256 is genuinely the
-        algorithm in use before the forgery attempts below assume it.
+        algorithm in use before the forgery attempts.
         """
         self.client.register("attacker")
         token = self.client.login("attacker")
@@ -154,6 +154,10 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
         )
 
     def _test_weak_secret_forgery(self, book_title: str) -> VulnerabilityResult:
+        """
+        Forges an "admin" token using the guessed hardcoded secret and 
+        checks if the server accepts it.
+        """
         path = f"{BOOKS_PATH}/{book_title}"
         forged = self._forge_token(self.weak_secret, sub="admin")
         resp = self.client.get(path, token=forged)
@@ -183,7 +187,8 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
     def _test_control_wrong_secret_rejected(
         self, book_title: str
     ) -> VulnerabilityResult:
-        """Control: identical forged claims, signed with a different,
+        """
+        Control: identical forged claims, signed with a different,
         non-guessed secret, must be rejected — otherwise the finding above
         would just mean "any token works", not specifically a weak secret.
         """
@@ -213,7 +218,8 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
         )
 
     def _test_alg_none_rejected(self, book_title: str) -> VulnerabilityResult:
-        """Separate root cause from weak-secret forgery: an unsigned
+        """
+        Control: Separate root cause from weak-secret forgery: an unsigned
         `alg: none` token has no secret to guess at all.
         """
         path = f"{BOOKS_PATH}/{book_title}"
@@ -244,12 +250,11 @@ class JWTWeakSigningBypassTest(VulnerabilityTest):
 
 
 def _fresh_synthetic_login(client: CrAPIClient, role: str) -> None:
-    """Sign up and log in a brand-new synthetic identity for `role`.
+    """Sign up and log in a new identity (CrAPI test account) for `role`.
 
     crAPI enforces unique email *and* phone number per account and has no
     reseed endpoint, so each test run needs its own fresh identity rather
-    than reusing config's static test_users values, which would 403
-    ("already registered") on a second run.
+    than reusing config's static test_users values.
     """
     user = client.test_users[role]
     suffix = uuid.uuid4().hex[:10]
@@ -264,26 +269,6 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
     Confirms whether crapi-identity verifies a JWT's signature before
     trusting its claims, and whether its RSA signing key is itself
     forgeable when that check does happen.
-
-    crapi-identity signs tokens with RS256, not the HS256 the JWT_SECRET
-    environment variable's name suggests — that variable is unused for
-    token signing. The private key comes from `/app/default_jwks.json`
-    inside the crapi-identity image, used whenever docker/keys/ is left
-    empty (the case for this project's docker-compose.crapi.yml), and is
-    therefore identical across every deployment that hasn't supplied its
-    own JWKS.
-
-    `GET /identity/api/v2/user/dashboard` reads the `sub` claim out of the
-    JWT payload without verifying the signature at all: an `alg: none`
-    token for a victim's email who never logged in this run returns that
-    victim's full profile, while the same token with a syntactically
-    valid but unregistered email 404s — confirming the route is trusting
-    whatever email is handed to it, not authenticating the caller.
-
-    `GET /identity/api/v2/vehicle/vehicles` does check the signature (a
-    token signed with an unrelated, freshly-generated RSA key is
-    rejected), but accepts a token signed with the default key above,
-    confirming that key is the actual root of trust and is not a secret.
     """
 
     name = "jwt_signature_verification_bypass"
@@ -307,6 +292,9 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
         )
 
     def run(self) -> list[VulnerabilityResult]:
+        """
+        Logs in a fresh "victim," then runs the baseline and attack/control checks.
+        """
         _fresh_synthetic_login(self.client, "victim")
         victim_email = self.client.test_users["victim"]["email"]
 
@@ -338,6 +326,7 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
 
     @staticmethod
     def _forge_rs256_token(key: Any, kid: str, sub: str) -> str:
+        """Builds a fake token signed with a given RSA key."""
         now = datetime.now(timezone.utc)
         payload = {
             "sub": sub,
@@ -350,6 +339,7 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
 
     @staticmethod
     def _forge_alg_none_token(sub: str) -> str:
+        """Builds a fake unsigned-token (alg=none)"""
         now = datetime.now(timezone.utc)
         payload = {
             "sub": sub,
@@ -362,9 +352,10 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
     # -- checks --------------------------------------------------------------
 
     def _test_rs256_algorithm_confirmed(self) -> VulnerabilityResult:
-        """Baseline: decode a real, server-issued token's header (without
+        """
+        Baseline: decodes a real, server-issued token's header (without
         verifying its signature) to confirm RS256 is genuinely the
-        algorithm in use before the forgery attempts below assume it.
+        algorithm in use before the forgery attempts.
         """
         token = self.client.login("victim")
         header = jwt.get_unverified_header(token)
@@ -394,6 +385,11 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
     def _test_dashboard_alg_none_forgery(
         self, victim_email: str
     ) -> VulnerabilityResult:
+        """
+        Sends an unsigned token claiming to be the victim and checks 
+        if the dashboard endpoint returns the victim's real data 
+        without checking the signature.
+        """
         forged = self._forge_alg_none_token(sub=victim_email)
         resp = self.client.get(self.dashboard_path, token=forged)
         confirmed = (
@@ -425,7 +421,8 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
     def _test_dashboard_control_nonexistent_subject_rejected(
         self,
     ) -> VulnerabilityResult:
-        """Control: the same unsigned-token technique with a syntactically
+        """
+        Control: the same unsigned-token technique with a syntactically
         valid but never-registered email must fail — otherwise the result
         above would just mean "this route returns arbitrary data", not
         specifically "this route trusts a forged identity claim".
@@ -459,6 +456,10 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
     def _test_vehicles_default_key_forgery(
         self, victim_email: str
     ) -> VulnerabilityResult:
+        """
+        Signs a token with crAPI's default (publicly-shipped) signing key and 
+        checks if the vehicles endpoint accepts it as the victim.
+        """
         forged = self._forge_rs256_token(
             self.default_signing_key, self.default_kid, sub=victim_email
         )
@@ -490,7 +491,8 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
     def _test_vehicles_control_wrong_key_rejected(
         self, victim_email: str
     ) -> VulnerabilityResult:
-        """Control: identical forged claims, signed with a different,
+        """
+        Control: identical forged claims, signed with a different,
         freshly-generated RSA key, must be rejected — otherwise the
         default-key result above would just mean "any signature works",
         not specifically that the default key is guessable.
@@ -523,6 +525,10 @@ class JWTSignatureVerificationBypassTest(VulnerabilityTest):
 
     @staticmethod
     def _parse_json(resp: Any) -> dict[str, Any]:
+        """
+        Convers an HTTP response into a Python dictionary, or 
+        empty dict if it isn't valid JSON.
+        """
         try:
             return resp.json()
         except ValueError:

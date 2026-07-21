@@ -41,9 +41,7 @@ SQL_ERROR_SIGNATURES = ("sqlite3", "operationalerror", "syntax error", "sqlalche
 
 
 class SQLiUserLookupTest(VulnerabilityTest):
-    """
-    Confirms SQL injection in VAmPI's `GET /users/v1/{username}` lookup.
-    """
+    """Confirms SQL injection in VAmPI's `GET /users/v1/{username}` lookup."""
 
     name = "sqli_user_lookup"
     owasp_category = "API8:2023 Security Misconfiguration"
@@ -54,6 +52,11 @@ class SQLiUserLookupTest(VulnerabilityTest):
         self.payloads: list[str] = client.scan_config.get("sqli_payloads", [])
 
     def run(self) -> list[VulnerabilityResult]:
+        """
+        Seeds the database, logs in an attacker, runs a control check, 
+        then loops through every configured payload, routing each to 
+        the right specific test method below based on what kind of payload it is.
+        """
         self.client.seed_database()
         self.client.register("attacker")
         self.client.login("attacker")
@@ -84,7 +87,7 @@ class SQLiUserLookupTest(VulnerabilityTest):
     # -- request plumbing ------------------------------------------------
 
     def _path_for(self, raw_value: str) -> str:
-        """Percent-encode the payload as a single path segment ourselves."""
+        """Builds the URL and encode the payload."""
         template = self.client.endpoints.get("sqli_target", "/users/v1/{username}")
         encoded = urllib.parse.quote(raw_value, safe="")
         return template.format(username=encoded)
@@ -92,7 +95,7 @@ class SQLiUserLookupTest(VulnerabilityTest):
     def _safe_get(
         self, path: str, as_user: Optional[str] = None
     ) -> Optional[requests.Response]:
-        """GET the path, treating transport-level failures as a signal."""
+        """Send GET request and catches connection failures."""
         try:
             return self.client.get(path, as_user=as_user)
         except requests.exceptions.RequestException as exc:
@@ -101,6 +104,7 @@ class SQLiUserLookupTest(VulnerabilityTest):
 
     @staticmethod
     def _parse_json(resp: requests.Response) -> Optional[dict[str, Any]]:
+        """Parses JSON body."""
         try:
             return resp.json()
         except ValueError:
@@ -109,7 +113,10 @@ class SQLiUserLookupTest(VulnerabilityTest):
     # -- individual checks -------------------------------------------------
 
     def _test_control_nonexistent_user(self) -> VulnerabilityResult:
-        """Baseline: a genuinely nonexistent, non-malicious username must 404."""
+        """
+        Control (baseline): a nonexistent, non-malicious username 
+        must return not found (404).
+        """
         control_username = f"nonexistent_{uuid.uuid4().hex[:10]}"
         path = self._path_for(control_username)
         resp = self._safe_get(path)
@@ -141,6 +148,10 @@ class SQLiUserLookupTest(VulnerabilityTest):
         )
 
     def _test_error_based(self, payload: str) -> VulnerabilityResult:
+        """
+        Sends a payload to break the raw SQL query and  checks the response 
+        for a server error or a database error message.
+        """
         path = self._path_for(payload)
         resp = self._safe_get(path)
 
@@ -188,6 +199,11 @@ class SQLiUserLookupTest(VulnerabilityTest):
     def _test_boolean_based(
         self, payload: str, as_user: Optional[str]
     ) -> VulnerabilityResult:
+        """
+        Sends an "OR always-true" payload (boolean based) and checks if it returns 
+        any real user despite no literal match. 
+        Re-runs with a valid login to prove a token doesn't fix the problem.
+        """
         path = self._path_for(payload)
         resp = self._safe_get(path, as_user=as_user)
 
@@ -233,6 +249,10 @@ class SQLiUserLookupTest(VulnerabilityTest):
         )
 
     def _test_admin_extraction(self, payload: str) -> VulnerabilityResult:
+        """
+        Targeted payload designed to specifically pull back the 
+        "admin" account's data via a SQL comment trick.
+        """
         path = self._path_for(payload)
         resp = self._safe_get(path)
 
@@ -275,6 +295,11 @@ class SQLiUserLookupTest(VulnerabilityTest):
         )
 
     def _test_union_canary(self, payload_template: str) -> VulnerabilityResult:
+        """
+        Uses a `UNION SELECT` payload with a unique random "canary" string, and 
+        checks whether that string gets echoed back — proof the attacker 
+        fully controls what data comes back (not just yes/no).
+        """
         canary = f"sqlicanary{uuid.uuid4().hex[:12]}"
         payload = payload_template.format(canary=canary)
         path = self._path_for(payload)
@@ -315,12 +340,12 @@ class SQLiUserLookupTest(VulnerabilityTest):
 
 
 def _fresh_synthetic_login(client: CrAPIClient, role: str) -> None:
-    """Sign up and log in a brand-new synthetic identity for `role`.
+    """
+    Signs up and logs in a new identity (CrAPI test account) for `role`.
 
     crAPI enforces unique email *and* phone number per account and has no
     reseed endpoint (see module docstring), so each test run needs its own
-    fresh identity rather than reusing config's static test_users values,
-    which would 403 ("already registered") on a second run.
+    fresh identity.
     """
     user = client.test_users[role]
     suffix = uuid.uuid4().hex[:10]
@@ -332,19 +357,7 @@ def _fresh_synthetic_login(client: CrAPIClient, role: str) -> None:
 
 class NoSQLiCouponValidateTest(VulnerabilityTest):
     """
-    Confirms NoSQL injection in crAPI's
-    `POST /community/api/v2/coupon/validate-coupon`.
-
-    crapi-community unmarshals the raw request body directly into a MongoDB
-    bson.M filter with no shape validation, so a Mongo query operator in
-    the request body (e.g. {"coupon_code": {"$ne": 1}}) is honoured as
-    query logic instead of a literal value — crAPI's own documented
-    "Challenge 12": a free coupon without ever knowing a real coupon code.
-
-    Mapped to "API8:2023 Security Misconfiguration" (Injection has no
-    dedicated OWASP API category), matching the mapping used for VAmPI's
-    SQLiUserLookupTest so injection findings stay comparable across REST
-    targets (ProposalReport.docx §3.4).
+    Confirms NoSQL injection in crAPI's `POST /community/api/v2/coupon/validate-coupon`.
     """
 
     name = "nosqli_coupon_validate"
@@ -356,6 +369,7 @@ class NoSQLiCouponValidateTest(VulnerabilityTest):
         self.payloads: list[Any] = client.scan_config.get("nosql_coupon_payloads", [])
 
     def run(self) -> list[VulnerabilityResult]:
+        """Logs in a fresh attacker, runs control checks and detection tests."""
         _fresh_synthetic_login(self.client, "attacker")
 
         results = [
@@ -371,6 +385,7 @@ class NoSQLiCouponValidateTest(VulnerabilityTest):
     def _safe_validate(
         self, body: dict[str, Any], as_user: Optional[str]
     ) -> Optional[requests.Response]:
+        """sends the coupon-validation request and catches transport failures."""
         try:
             return self.client.validate_coupon(body, as_user=as_user)
         except requests.exceptions.RequestException as exc:
@@ -381,6 +396,7 @@ class NoSQLiCouponValidateTest(VulnerabilityTest):
 
     @staticmethod
     def _parse_json(resp: requests.Response) -> Optional[dict[str, Any]]:
+        """Parses JSON body."""
         try:
             return resp.json()
         except ValueError:
@@ -389,7 +405,7 @@ class NoSQLiCouponValidateTest(VulnerabilityTest):
     # -- individual checks -------------------------------------------------
 
     def _test_control_nonexistent_code(self) -> VulnerabilityResult:
-        """Baseline: a genuinely nonexistent, literal coupon_code must not match."""
+        """Control (baseline): a nonexistent coupon_code must not match or fial."""
         control_code = f"nonexistent_{uuid.uuid4().hex[:10]}"
         body = {"coupon_code": control_code}
         resp = self._safe_validate(body, as_user="attacker")
@@ -421,10 +437,7 @@ class NoSQLiCouponValidateTest(VulnerabilityTest):
         )
 
     def _test_unauthenticated_rejected(self) -> VulnerabilityResult:
-        """Extra retest: confirms whether auth is required at all before
-        drawing conclusions about it being (or not being) a compensating
-        control against the injection — see _test_operator_payload.
-        """
+        """Control (baseline): Confirms this endpoint does require a login."""
         payload = self.payloads[0] if self.payloads else {"$ne": 1}
         body = {"coupon_code": payload}
         resp = self._safe_validate(body, as_user=None)
@@ -464,6 +477,10 @@ class NoSQLiCouponValidateTest(VulnerabilityTest):
         )
 
     def _test_operator_payload(self, payload: Any) -> VulnerabilityResult:
+        """
+        Sends a MongoDB operator (like {"$ne": 1}) instead of a plain string as the coupon code.
+        If it returns a real coupon, the server is trusting attacker-supplied query logic.
+        """
         body = {"coupon_code": payload}
         resp = self._safe_validate(body, as_user="attacker")
 
@@ -514,24 +531,7 @@ class NoSQLiCouponValidateTest(VulnerabilityTest):
 
 
 class SQLiApplyCouponTest(VulnerabilityTest):
-    """
-    Confirms SQL injection in crAPI's `POST /workshop/api/shop/apply_coupon`.
-
-    crapi-workshop string-concatenates coupon_code directly into a raw SQL
-    query with no parameterisation, run unconditionally on every call
-    before any coupon-existence check. A stacked-query payload
-    (`0'; select version() --+`) leaks a PostgreSQL version banner into the
-    response on a fresh container. A boolean tautology payload
-    (`0' or '0' = '0`) matches every row in the applied_coupon table
-    instead of being scoped to the caller's own rows; the tautology
-    sub-test applies one real coupon as setup so a matching row exists,
-    which permanently adds a row to that table on every run since crAPI
-    has no reset endpoint.
-
-    Mapped to "API8:2023 Security Misconfiguration", same rationale as
-    NoSQLiCouponValidateTest.
-    """
-
+    """Confirms SQL injection in crAPI's `POST /workshop/api/shop/apply_coupon`."""
     name = "sqli_apply_coupon"
     owasp_category = "API8:2023 Security Misconfiguration"
 
@@ -541,6 +541,10 @@ class SQLiApplyCouponTest(VulnerabilityTest):
         self.payloads: list[str] = client.scan_config.get("sqli_coupon_payloads", [])
 
     def run(self) -> list[VulnerabilityResult]:
+        """
+        Logs in a fresh attacker, runs a control check, then routes each payload 
+        to either the stacked-query test or the tautology test.
+        """
         _fresh_synthetic_login(self.client, "attacker")
 
         results = [self._test_control_nonexistent_code()]
@@ -559,6 +563,7 @@ class SQLiApplyCouponTest(VulnerabilityTest):
     def _safe_apply(
         self, coupon_code: str, amount: int, as_user: Optional[str]
     ) -> Optional[requests.Response]:
+        """Sends apply-coupon request."""
         try:
             return self.client.apply_coupon(coupon_code, amount, as_user=as_user)
         except requests.exceptions.RequestException as exc:
@@ -569,6 +574,7 @@ class SQLiApplyCouponTest(VulnerabilityTest):
 
     @staticmethod
     def _parse_json(resp: requests.Response) -> Optional[dict[str, Any]]:
+        """Parses JSON body."""
         try:
             return resp.json()
         except ValueError:
@@ -577,6 +583,7 @@ class SQLiApplyCouponTest(VulnerabilityTest):
     # -- individual checks -------------------------------------------------
 
     def _test_control_nonexistent_code(self) -> VulnerabilityResult:
+        """Control (baseline): Made-up coupon to return 'not found' error."""
         control_code = f"nonexistent_{uuid.uuid4().hex[:10]}"
         resp = self._safe_apply(control_code, 0, as_user="attacker")
 
@@ -614,6 +621,7 @@ class SQLiApplyCouponTest(VulnerabilityTest):
         )
 
     def _test_unauthenticated_rejected(self, payload: str) -> VulnerabilityResult:
+        """Control (baseline): Confirms log-in is required."""
         resp = self._safe_apply(payload, 0, as_user=None)
 
         if resp is None:
@@ -653,6 +661,11 @@ class SQLiApplyCouponTest(VulnerabilityTest):
         )
 
     def _test_stacked_query(self, payload: str) -> VulnerabilityResult:
+        """
+        Sends a payload e.g. `0'; select version() --+` to run a second, "stacked" SQL statement — 
+        checks if the database's version banner leaks into the response 
+        (possible unparameterised SQL execution).
+        """
         resp = self._safe_apply(payload, 0, as_user="attacker")
 
         if resp is None:
@@ -694,14 +707,10 @@ class SQLiApplyCouponTest(VulnerabilityTest):
         )
 
     def _discover_and_apply_real_coupon(self) -> Optional[str]:
-        """Setup step for _test_tautology.
-
-        Discovers a currently-valid coupon code via the same $ne operator
-        NoSQLiCouponValidateTest uses, then applies it to the attacker
-        account so a row exists in applied_coupon for the tautology
-        payload to match. Returns the applied coupon_code, or None if
-        discovery/application failed (the tautology test is then skipped
-        as inconclusive).
+        """
+        Setups step for _test_tautology. Finds and applies one real coupon first.
+        Returns the applied coupon_code, or None if discovery/application failed 
+        (the tautology test is then skipped as inconclusive).
         """
         try:
             discover_resp = self.client.validate_coupon(
@@ -732,6 +741,12 @@ class SQLiApplyCouponTest(VulnerabilityTest):
         return coupon_code
 
     def _test_tautology(self, payload: str) -> VulnerabilityResult:
+        """
+        Sends a payload like `0' or '0'='0` as the coupon code.
+        If the server reports the real coupon applied earlier as 
+        "already claimed" despite the payload not literally matching it, 
+        that proves the WHERE clause was hijacked to match every row.
+        """
         applied_code = self._discover_and_apply_real_coupon()
         if applied_code is None:
             # Setup-failure fallback, not a security-behavior baseline.
