@@ -1,7 +1,3 @@
-"""
-crAPI-specific REST API client.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -15,9 +11,9 @@ from src.utils.api_client import ConfigError, RESTAPIClient
 
 logger = logging.getLogger(__name__)
 
-# crAPI's welcome email embeds a per-account VIN/pincode as HTML font tags;
-# MailHog stores the raw MIME source, so these patterns pull the two values
-# straight out of it (see fetch_welcome_credentials).
+# crAPI emails (a welcome mail) a new user their VIN and PIN as HTML font tags (raw format);
+# MailHog (fake email server) stores the raw MIME source.
+# These regex extract the two values from raw format.
 _VIN_PATTERN = re.compile(r"VIN:\s*</font><font[^>]*>([A-Z0-9]+)")
 _PINCODE_PATTERN = re.compile(r"Pincode:\s*<font[^>]*>(\d+)")
 
@@ -30,9 +26,7 @@ class CrAPIClient(RESTAPIClient):
         return self._config.get("scan", {})
 
     def signup(self, role: str) -> requests.Response:
-        """
-        Register a test user identified by role
-        """
+        """Register a test user identified by role."""
         user = self._require_user(role)
         path = self.endpoints.get("signup", "/identity/api/auth/signup")
         payload = {
@@ -46,9 +40,7 @@ class CrAPIClient(RESTAPIClient):
         return resp
 
     def login(self, role: str) -> str:
-        """
-        Log in a test user and store their token for later requests.
-        """
+        """Log in a test user and store their token for later requests."""
         user = self._require_user(role)
         path = self.endpoints.get("login", "/identity/api/auth/login")
         payload = {"email": user["email"], "password": user["password"]}
@@ -69,9 +61,7 @@ class CrAPIClient(RESTAPIClient):
     def validate_coupon(
         self, body: dict[str, Any], as_user: Optional[str]
     ) -> requests.Response:
-        """
-        POST to the NoSQL-injectable validate-coupon endpoint.
-        """
+        """POST to the NoSQL-injectable validate-coupon endpoint."""
         path = self.endpoints.get(
             "validate_coupon", "/community/api/v2/coupon/validate-coupon"
         )
@@ -86,9 +76,7 @@ class CrAPIClient(RESTAPIClient):
     def apply_coupon(
         self, coupon_code: str, amount: int, as_user: Optional[str]
     ) -> requests.Response:
-        """P
-        OST to the SQL-injectable apply_coupon endpoint.
-        """
+        """POST to the SQL-injectable apply_coupon endpoint."""
         path = self.endpoints.get("apply_coupon", "/workshop/api/shop/apply_coupon")
         resp = self.session.post(
             self._url(path),
@@ -101,9 +89,7 @@ class CrAPIClient(RESTAPIClient):
     def add_vehicle(
         self, vin: str, pincode: str, as_user: Optional[str]
     ) -> requests.Response:
-        """
-        Registers a vehicle (by VIN + pincode) to the calling account.
-        """
+        """Registers a vehicle (by VIN + pincode) to the calling account."""
         path = self.endpoints.get("add_vehicle", "/identity/api/v2/vehicle/add_vehicle")
         resp = self.session.post(
             self._url(path),
@@ -114,9 +100,7 @@ class CrAPIClient(RESTAPIClient):
         return resp
 
     def list_vehicles(self, as_user: Optional[str]) -> requests.Response:
-        """
-        Lists vehicles registered to the calling account.
-        """
+        """Lists vehicles registered to the calling account."""
         path = self.endpoints.get("vehicles", "/identity/api/v2/vehicle/vehicles")
         return self.session.get(
             self._url(path), headers=self._headers_for(as_user), timeout=self.timeout
@@ -125,9 +109,7 @@ class CrAPIClient(RESTAPIClient):
     def get_vehicle_location(
         self, vehicle_id: str, as_user: Optional[str]
     ) -> requests.Response:
-        """
-        Fetches a vehicle's GPS location and owner details by vehicle id.
-        """
+        """Fetches a vehicle's GPS location and owner details by vehicle id."""
         template = self.endpoints.get(
             "vehicle_location", "/identity/api/v2/vehicle/{vehicle_id}/location"
         )
@@ -139,9 +121,7 @@ class CrAPIClient(RESTAPIClient):
     def create_order(
         self, product_id: int, quantity: int, as_user: Optional[str]
     ) -> requests.Response:
-        """
-        Places a shop order for the calling account.
-        """
+        """Places a shop order for the calling account."""
         path = self.endpoints.get("create_order", "/workshop/api/shop/orders")
         return self.session.post(
             self._url(path),
@@ -163,9 +143,7 @@ class CrAPIClient(RESTAPIClient):
         )
 
     def list_orders(self, as_user: Optional[str]) -> requests.Response:
-        """
-        Lists orders belonging to the calling account.
-        """
+        """Lists orders belonging to the calling account."""
         path = self.endpoints.get("orders_all", "/workshop/api/shop/orders/all")
         return self.session.get(
             self._url(path), headers=self._headers_for(as_user), timeout=self.timeout
@@ -176,8 +154,15 @@ class CrAPIClient(RESTAPIClient):
     ) -> Optional[tuple[str, str]]:
         """
         Retrieves the VIN and pincode crAPI emails a new account on signup,
-        via the MailHog instance in the crAPI docker-compose stack. Polls
-        briefly since delivery to MailHog is asynchronous.
+        via the MailHog instance in the crAPI docker-compose stack.
+
+        The email is not immediately available in MailHog after signup is done —
+        there is a short delay. The function checks MailHog, and if the email
+        is not yet there, waits `poll_interval` seconds and checks again, up to 
+        `max_attempts` times, before giving up and returning None.
+
+        Vehicle Identification Number (VIN) and Pincode pair are used as
+        vehicle-claim credential pair for an owner.
         """
         mailhog_url = self._config.get("target", {}).get(
             "mailhog_base_url", "http://127.0.0.1:8025"
@@ -201,6 +186,7 @@ class CrAPIClient(RESTAPIClient):
         return None
 
     def _require_user(self, role: str) -> dict[str, str]:
+        """Fetch a role's credentials from config, and raise errors if it is missing"""
         user = self.test_users.get(role)
         if not user:
             raise ConfigError(

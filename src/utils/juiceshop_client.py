@@ -22,9 +22,7 @@ class JuiceShopClient(RESTAPIClient):
         return self._config.get("scan", {})
 
     def register(self, role: str) -> requests.Response:
-        """
-        Register a test user identified by role.
-        """
+        """Register a test user identified by role."""
         user = self._require_user(role)
         path = self.endpoints.get("register", "/api/Users/")
         payload = {
@@ -37,6 +35,7 @@ class JuiceShopClient(RESTAPIClient):
         return resp
 
     def login(self, role: str) -> str:
+        """Log in a test user and store their auth token for later requests."""
         user = self._require_user(role)
         path = self.endpoints.get("login", "/rest/user/login")
         payload = {"email": user["email"], "password": user["password"]}
@@ -59,9 +58,7 @@ class JuiceShopClient(RESTAPIClient):
         return token
 
     def basket_id_for(self, role: str) -> int:
-        """
-        The basket id captured from `role`'s login response.
-        """
+        """Retrieve basket id from `role`'s login response."""
         bid = self._basket_ids.get(role)
         if bid is None:
             raise RuntimeError(
@@ -70,17 +67,27 @@ class JuiceShopClient(RESTAPIClient):
         return bid
 
     def get_basket(self, basket_id: int, as_user: str | None) -> requests.Response:
-        """GET a basket by raw id — the object under test for the BOLA finding."""
+        """
+        GET a shopping basket by its raw (numeric)id which is 
+        the object under test for the BOLA finding.
+
+        e.g. Guessing the id by increaseing by 1 at a time until a match happens.
+        """
         template = self.endpoints.get("basket", "/rest/basket/{id}")
         path = template.format(id=basket_id)
         return self.get(path, as_user=as_user)
 
     def get_user_exposure(self, as_user: str) -> requests.Response:
-        """GET the endpoint under test for the Excessive Data Exposure finding."""
+        """
+        GET the endpoint under test for the Excessive Data Exposure finding.
+
+        e.g. Hitting an endpoint deliberately to expose more user data than it should.
+        """
         path = self.endpoints.get("user_exposure", "/rest/user/authentication-details")
         return self.get(path, as_user=as_user)
 
     def _require_user(self, role: str) -> dict[str, str]:
+        """Fetch a role's credentials from config, and raise errors if it is missing"""
         user = self.test_users.get(role)
         if not user:
             raise ConfigError(

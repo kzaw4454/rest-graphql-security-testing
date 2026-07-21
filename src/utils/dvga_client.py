@@ -53,9 +53,19 @@ class DVGAClient(GraphQLAPIClient):
         return token
 
     def me(self, token: str) -> requests.Response:
-        """Call the `me` query with an arbitrary token — legitimate or forged."""
+        """
+        Call the `me` query with an arbitrary token — legitimate or forged.
+        Forged one for testing JWT-forgery authorization-bypass.
+        """
         query = self.operations["me"]
         return self.query(query, variables={"token": token})
+    
+    """
+    paste:
+    - A simple text-snippet ('paste') storage and retrieval feature.
+    - Its filter parameter is used as the injection point for testing SQL injection.
+    - Its value is concatenated into a raw SQL clause server-side without parameterisation.
+    """
 
     def create_paste(
         self, title: str, content: str, public: bool = True, burn: bool = False
@@ -108,22 +118,30 @@ class DVGAClient(GraphQLAPIClient):
             "difficulty_endpoint", "/difficulty/{level}"
         ).format(level=level)
         return self.get(path)
+    
+    """
+    GraphiQL is a built-in interactive web IDE that many GraphQL servers ship 
+    with for development. It's a browser page where a developer can type queries, 
+    see the schema, run them, and see results live. It is basically a debugging/testing 
+    console sitting right on top of the API.
+
+    Its a tool for developer only but not for public in production envionrment.
+    If not properly configured or never disabled, attacker can do a recon to probe the API.
+    """
 
     def graphiql_cookie(self) -> Optional[str]:
-        """Current value of the cookie gating the GraphiQL IDE route."""
+        """Get current value of the cookie."""
         cookie_name = self.scan_config.get("interface_protection", {}).get(
             "cookie_name", "env"
         )
         return self.session.cookies.get(cookie_name)
 
     def prime_graphiql_cookie(self) -> requests.Response:
-        """GET the root page so DVGA sets its GraphiQL protection cookie."""
+        """Go to the root page in which DVGA sets its GraphiQL protection cookie."""
         return self.get("/")
 
     def set_graphiql_cookie(self, value: str) -> None:
-        """
-        Override the GraphiQL protection cookie client-side.
-        """
+        """Override (to attack) the GraphiQL protection cookie client-side."""
         cookie_name = self.scan_config.get("interface_protection", {}).get(
             "cookie_name", "env"
         )
@@ -134,15 +152,14 @@ class DVGAClient(GraphQLAPIClient):
         self.session.cookies.set(cookie_name, value, domain=domain, path="/")
 
     def graphiql_query(self, query: str, **kwargs: Any) -> requests.Response:
-        """
-        Execute a GraphQL document through the `/graphiql`.
-        """
+        """Execute a GraphQL document through the `/graphiql` (after forging the cookie)."""
         path = self.scan_config.get("interface_protection", {}).get(
             "graphiql_path", "/graphiql"
         )
         return self.query(query, path=path, **kwargs)
 
     def _require_user(self, role: str) -> dict[str, str]:
+        """Fetch a role's credentials from config, and raise errors if it is missing"""
         user = self.test_users.get(role)
         if not user:
             raise ConfigError(

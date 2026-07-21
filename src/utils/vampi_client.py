@@ -1,7 +1,3 @@
-"""
-VAmPI-specific REST API client.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -15,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class VAmPIClient(RESTAPIClient):
-    """RESTAPIClient subclass wired to VAmPI's auth flow and reseed endpoint."""
+    """RESTAPIClient subclass for VAmPI's auth flow and reseeding endpoint."""
 
     @property
     def scan_config(self) -> dict[str, Any]:
@@ -42,7 +38,10 @@ class VAmPIClient(RESTAPIClient):
         return resp
 
     def get_debug(self, as_user: Optional[str] = None) -> requests.Response:
-        """Hit the debug/data-dump endpoint, unauthenticated or as `role`."""
+        """
+        Call the debug/data-dump endpoint, unauthenticated or as `role`.
+        as_user=None
+        """
         path = self.endpoints.get("debug", "/users/v1/_debug")
         resp = self.get(path, as_user=as_user)
         logger.info(
@@ -51,7 +50,7 @@ class VAmPIClient(RESTAPIClient):
         return resp
 
     def login(self, role: str) -> str:
-        """Log in a test user and store their token for later requests."""
+        """Log in a test user and store their auth token for later requests."""
         user = self._require_user(role)
         path = self.endpoints.get("login", "/users/v1/login")
         payload = {"username": user["username"], "password": user["password"]}
@@ -70,6 +69,7 @@ class VAmPIClient(RESTAPIClient):
         return token
 
     def _require_user(self, role: str) -> dict[str, str]:
+        """Fetch a role's credentials from config, and raise errors if it is missing"""
         user = self.test_users.get(role)
         if not user:
             raise ConfigError(
