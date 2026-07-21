@@ -1,5 +1,5 @@
 """
-Generic GraphQL API client base for interacting with vulnerable test targets.
+Generic GraphQL API client base (a wrapper) for interacting with vulnerable test targets.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class ConfigError(Exception):
-    """Raised when the target config file is missing or malformed."""
+    """Raised when the target (YAML) config file is missing or malformed."""
 
 
 class GraphQLAPIClient:
@@ -48,6 +48,11 @@ class GraphQLAPIClient:
 
     @classmethod
     def from_config(cls, config_path: str | Path) -> "GraphQLAPIClient":
+        """
+        Build a client (object) from a target's YAML config file.
+        The object includes base_url, timeout, endpoint_path, endpoint_url, 
+        test_users, _tokens, session, etc.
+        """
         path = Path(config_path)
         if not path.exists():
             raise ConfigError(f"Config file not found: {path}")
@@ -59,12 +64,18 @@ class GraphQLAPIClient:
 
     @property
     def endpoint_url(self) -> str:
+        """For only one endpoint (same URL)"""
         return f"{self.base_url}{self.endpoint_path}"
 
     def _url(self, path: str) -> str:
+        """For non-GraphQL route (get() method only) e.g. /graphiql"""
         return f"{self.base_url}{path}"
 
     def _headers_for(self, as_user: Optional[str]) -> dict[str, str]:
+        """
+        Build the auth header (Authorization: Bearer <token>).
+        Only work with token created from login.
+        """
         headers = {}
         if as_user:
             token = self._tokens.get(as_user)
@@ -84,6 +95,9 @@ class GraphQLAPIClient:
         path: Optional[str] = None,
         **kwargs: Any,
     ) -> requests.Response:
+        """
+        Build a GraphQL request body and POST it.
+        """
         body: dict[str, Any] = {"query": query}
         if variables is not None:
             body["variables"] = variables
@@ -112,9 +126,9 @@ class GraphQLAPIClient:
         path: Optional[str] = None,
     ) -> requests.Response:
         """
-        Send multiple query/mutation documents as a single batched HTTP
-        request (a JSON array body), rather than the single-object body
-        `execute()` sends. Targets are expected to either enforce a batch
+        Send multiple query/mutation documents as a 
+        single batched HTTP request (a JSON array body). 
+        Targets are expected to either enforce a batch
         size limit or execute the whole array unconditionally.
         """
         body = [{"query": q} for q in queries]
@@ -129,9 +143,7 @@ class GraphQLAPIClient:
     def get(
         self, path: str, as_user: Optional[str] = None, **kwargs: Any
     ) -> requests.Response:
-        """
-        Raw GET against the target's base_url
-        """
+        """Raw GET against the target's base_url."""
         return self.session.get(
             self._url(path),
             headers=self._headers_for(as_user),

@@ -1,10 +1,5 @@
 """
 Common interface for vulnerability test modules.
-
-- Shared contract only
-- No test logic
-- Concrete modules (e.g. authorization.py, injection.py)
-  subclass VulnerabilityTest and implement `run()`.
 """
 
 from __future__ import annotations
@@ -17,22 +12,23 @@ from typing import Any, Optional
 
 
 class Severity(str, Enum):
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
+    LOW = "low" # confirms the baseline (mostly 'control' assertion)
+    MEDIUM = "medium" # vulnerability exists but impact is limited
+    HIGH = "high" # exploited but scoped to one object/record
+    CRITICAL = "critical" # unbounded exploit or privileged impact (potential to whole system takeover)
 
 
 class AssertionRole(str, Enum):
-    DETECTION = "detection"  # tests the documented, in-scope vulnerability
-    CONTROL = "control"  # baseline expectation; failure here is not the target vuln
-    ADJACENT = "adjacent"  # control that failed and IS itself a real, separate, in-scope finding
+    DETECTION = "detection" # tests the documented, in-scope vulnerability
+    CONTROL = "control"     # baseline expectation; failure here is not the target vuln (not counted for statistics)
+    ADJACENT = "adjacent"   # control that failed and IS itself a real, separate, in-scope finding
 
 
 @dataclass
 class VulnerabilityResult:
     """
     Standardised result of a single vulnerability test run.
+    The result is logged under results/logs/.
     """
 
     test_name: str
@@ -57,7 +53,8 @@ class VulnerabilityResult:
 
 class VulnerabilityTest(ABC):
     """
-    Base class for all vulnerability test modules.
+    Base class for all vulnerability test modules
+    e.g. authorization.py, injection.py, graphql_dos.py
     """
 
     name: str = "unnamed_test"
@@ -82,7 +79,7 @@ class VulnerabilityTest(ABC):
         assertion_role: AssertionRole = AssertionRole.DETECTION,
         **extra: Any,
     ) -> VulnerabilityResult:
-        """Convenience factory for subclasses not to repeat boilerplate fields."""
+        """Factory for subclasses not to repeat boilerplate fields."""
         return VulnerabilityResult(
             test_name=self.name,
             owasp_category=self.owasp_category,

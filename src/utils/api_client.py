@@ -1,5 +1,5 @@
 """
-Generic REST API client base for interacting with vulnerable test targets.
+Generic REST API client base (a wrapper) for interacting with vulnerable test targets.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class ConfigError(Exception):
-    """Raised when the target config file is missing or malformed."""
+    """Raised when the target (YAML) config file is missing or malformed."""
 
 
 class RESTAPIClient:
@@ -45,6 +45,10 @@ class RESTAPIClient:
 
     @classmethod
     def from_config(cls, config_path: str | Path) -> "RESTAPIClient":
+        """
+        Build a client (object) from a target's YAML config file.
+        The object includes base_url, timeout, endpoints, test_users, _tokens, session, etc.
+        """
         path = Path(config_path)
         if not path.exists():
             raise ConfigError(f"Config file not found: {path}")
@@ -60,11 +64,12 @@ class RESTAPIClient:
     def _headers_for(
         self, as_user: Optional[str] = None, token: Optional[str] = None
     ) -> dict[str, str]:
-        """Build the auth header. `token`, when given, is sent as-is —
-        bypassing `_tokens` lookup — so callers can attach a forged or
-        otherwise arbitrary bearer value (e.g. weak-signing-key tests)
-        without it ever being stored under a role.
         """
+        Build the auth header (Authorization: Bearer <token>).
+        Allow to inject fake/forged token
+        """
+        # If a token (fake/forged) is passed directly, the method 
+        # immediately builds the header from that raw value and returns
         if token is not None:
             return {self.token_header: f"{self.token_prefix} {token}"}
         headers = {}
@@ -76,6 +81,11 @@ class RESTAPIClient:
                 )
             headers[self.token_header] = f"{self.token_prefix} {stored_token}"
         return headers
+    
+    """
+    HTTP methods (GET, POST, PUT, and DELETE) to
+    fetch, create, update, and remove data.
+    """
 
     def get(
         self,
