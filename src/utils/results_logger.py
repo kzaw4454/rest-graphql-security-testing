@@ -22,12 +22,16 @@ RESULTS_LOG_ROOT = REPO_ROOT / "results" / "logs"
 
 
 def _slugify(value: str) -> str:
-    """Lowercase, filesystem-safe slug for an owasp_category string."""
+    """
+    Lowercase, filesystem-safe slug for an owasp_category string.
+    Turn "API2:2023 Broken Authentication" into a filesystem-safe 
+    folder name e.g. "api2_2023_broken_authentication".
+    """
     return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
 
 
 def _git_commit_sha() -> Optional[str]:
-    """Current commit SHA, best-effort. None outside a git checkout."""
+    """Current git commit ID, SHA."""
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"],
@@ -43,6 +47,7 @@ def _git_commit_sha() -> Optional[str]:
 
 
 def _new_run_id() -> str:
+    """Generate unqiue label with time stamp for each log file."""
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{timestamp}_{uuid.uuid4().hex[:6]}"
 
@@ -66,6 +71,10 @@ class RunLogger:
         self._manifest: dict[str, Any] = {}
 
     def __enter__(self) -> "RunLogger":
+        """
+        Create the output folder, build the initial manifest dict (start time,
+        git commit, Python version, etc.), and write it to disk.
+        """
         self._target_dir.mkdir(parents=True, exist_ok=True)
         self._manifest = {
             "run_id": self.run_id,
@@ -111,6 +120,10 @@ class RunLogger:
         exc: Optional[BaseException],
         traceback: Optional[TracebackType],
     ) -> None:
+        """
+        Record end time, final pass/fail totals, and capture any exception 
+        that occurred so a crash gets logged instead of silently lost.
+        """
         self._manifest["end_time"] = datetime.now(timezone.utc).isoformat()
         self._manifest["passed"] = self._passed
         self._manifest["failed"] = self._failed
@@ -118,6 +131,7 @@ class RunLogger:
         self._write_manifest()
 
     def _write_manifest(self) -> None:
+        """Dump the manifest dictionary to its JSON file."""
         with self._manifest_path.open("w") as f:
             json.dump(self._manifest, f, indent=2)
             f.write("\n")
