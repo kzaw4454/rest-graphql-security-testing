@@ -42,6 +42,7 @@ class JWTTokenForgeTest(VulnerabilityTest):
         self.client = client
 
     def run(self) -> list[VulnerabilityResult]:
+        """Logs in as 'operator' and runs the checks."""
         token = self.client.login("operator")
 
         return [
@@ -50,7 +51,7 @@ class JWTTokenForgeTest(VulnerabilityTest):
         ]
 
     def _test_legitimate_token(self, token: str) -> VulnerabilityResult:
-        """Baseline: a genuine token for 'operator' must only return their own record."""
+        """Control (baseline): a genuine token for 'operator' must only return their own record."""
         resp = self.client.me(token)
         data = _parse_json(resp) or {}
         me = data.get("data", {}).get("me") or {}
@@ -74,7 +75,11 @@ class JWTTokenForgeTest(VulnerabilityTest):
         )
 
     def _test_forged_admin_token(self) -> VulnerabilityResult:
-        """Bypass: a JWT with a forged identity claim and no valid signature."""
+        """
+        Forges a token (as admin without valid signature) and checks
+        whether `me` returns admin's data including the password to prove
+        signature is never checked.
+        """
         forged_identity = self.client.scan_config.get("jwt_forge", {}).get(
             "forged_identity", "admin"
         )
@@ -125,7 +130,7 @@ class GraphiQLInterfaceProtectionBypassTest(VulnerabilityTest):
     PROBE_QUERY = "{ __typename }"
 
     def run(self) -> list[VulnerabilityResult]:
-
+        """Sets `easy` difficulty, creates the server-issued cookie, and runs the checks"""
         self.client.set_difficulty("easy")
         self.client.prime_graphiql_cookie()
         return [
@@ -134,7 +139,7 @@ class GraphiQLInterfaceProtectionBypassTest(VulnerabilityTest):
         ]
 
     def _test_default_cookie_blocks(self) -> VulnerabilityResult:
-        """Baseline: the cookie DVGA itself set on first load must block query execution."""
+        """Control (baseline): the cookie DVGA itself set on first load must block query execution."""
         cfg = self.client.scan_config.get("interface_protection", {})
         current_cookie = self.client.graphiql_cookie()
         resp = self.client.graphiql_query(self.PROBE_QUERY)
@@ -213,7 +218,7 @@ class QueryDenyListBypassTest(VulnerabilityTest):
         ]
 
     def _test_denied_query_blocked(self) -> VulnerabilityResult:
-        """Baseline: the restricted query, sent as-is, must be rejected."""
+        """Control (baseline): the restricted query, sent as-is, must be rejected."""
         cfg = self.client.scan_config.get("deny_list_bypass", {})
         denied_query = cfg.get("denied_query", "{ systemHealth }")
         resp = self.client.query(denied_query)
