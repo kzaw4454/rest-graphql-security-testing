@@ -1,11 +1,5 @@
 """
 GraphQL Denial of Service tests (DVGA).
-
-`DeepNestingDoSTest` and `BatchQueryDoSTest` are both resource-consumption
-findings rather than clean pass/fail exploits — "vulnerable" is a matter of
-degree (how deep, how large a batch) rather than a single boolean outcome.
-Each test states this limitation directly in its evidence and stops short
-of claiming a precise severity threshold DVGA itself does not define.
 """
 
 from __future__ import annotations
@@ -36,18 +30,7 @@ def _parse_json(resp: requests.Response) -> Optional[dict[str, Any]]:
 
 
 class DeepNestingDoSTest(VulnerabilityTest):
-    """
-    Confirms whether arbitrarily deep, cyclic queries are rejected.
-
-    `DepthProtectionMiddleware` rejects a query once
-    `parser.get_depth()` — a count of literal '{' tokens in the raw query
-    text, not real AST depth — exceeds `config.MAX_DEPTH` (8), but only
-    when the server is in hard difficulty mode. DVGA's schema exposes a
-    cyclic relation (`PasteObject.owner` -> `OwnerObject.pastes` ->
-    `PasteObject.owner` -> ...) with no depth limit of its own, so in the
-    server's default easy mode a deeply nested query executes in full,
-    with response size growing combinatorially at each additional level.
-    """
+    """Confirms whether arbitrarily deep, cyclic queries are rejected."""
 
     name = "deep_nesting_dos"
     owasp_category = "API4:2023 Unrestricted Resource Consumption"
@@ -57,6 +40,10 @@ class DeepNestingDoSTest(VulnerabilityTest):
         self.client = client
 
     def run(self) -> list[VulnerabilityResult]:
+        """
+        Runs a shallow-query control and a deep-query control in hard mode, 
+        then the real detection in easy mode.
+        """
         cfg = self.client.scan_config.get("deep_nesting_dos", {})
         shallow_query = cfg.get(
             "shallow_query", "{ pastes(public: true) { owner { pastes { title } } } }"
@@ -80,7 +67,7 @@ class DeepNestingDoSTest(VulnerabilityTest):
     def _test_hard_mode_allows_shallow_query(
         self, shallow_query: str
     ) -> VulnerabilityResult:
-        """Baseline: hard mode must not reject a query under the depth threshold."""
+        """Control (baseline): hard mode must not reject a query under the depth threshold."""
         resp = self.client.query(shallow_query)
         data = _parse_json(resp) or {}
         errors = data.get("errors")
@@ -102,7 +89,10 @@ class DeepNestingDoSTest(VulnerabilityTest):
     def _test_hard_mode_rejects_deep_query(
         self, deep_query: str
     ) -> VulnerabilityResult:
-        """Baseline: hard mode's DepthProtectionMiddleware must reject a query over the depth threshold."""
+        """
+        Control (baseline): hard mode's DepthProtectionMiddleware must reject 
+        a query over the depth threshold.
+        """
         resp = self.client.query(deep_query)
         data = _parse_json(resp) or {}
         errors = data.get("errors") or []
@@ -125,17 +115,7 @@ class DeepNestingDoSTest(VulnerabilityTest):
     def _test_easy_mode_executes_deep_query(
         self, deep_query: str
     ) -> VulnerabilityResult:
-        """Bypass: DVGA's default (easy) mode has no depth limit at all.
-
-        Response size grows combinatorially with each additional
-        owner/pastes level, since every level expands a list rather than a
-        single record — so this request can legitimately exceed the
-        client's own configured timeout as more paste data accumulates in
-        the container across runs. A timeout is treated as confirming the
-        finding rather than as a transport failure: it demonstrates
-        resource exhaustion more directly than a slow-but-completed
-        response would.
-        """
+        """Bypass: DVGA's default (easy) mode has no depth limit at all."""
         start = time.monotonic()
         try:
             resp = self.client.query(deep_query)
@@ -190,18 +170,7 @@ class DeepNestingDoSTest(VulnerabilityTest):
 
 
 class BatchQueryDoSTest(VulnerabilityTest):
-    """
-    Confirms whether an oversized batched request is accepted unchecked.
-
-    The `/graphql` view is registered with `batch=True`
-    (flask-graphql/graphql-server), accepting a JSON array of query
-    objects in a single HTTP request. No code path enforces a maximum
-    array length, and — unlike introspection or depth protection — this is
-    not gated by difficulty mode either: `CostProtectionMiddleware` and
-    `DepthProtectionMiddleware` evaluate each array element independently
-    and never sum across the whole batch, so a single request can still
-    multiply server-side work by an arbitrary factor regardless of mode.
-    """
+    """Confirms whether an oversized batched request is accepted unchecked."""
 
     name = "batch_query_dos"
     owasp_category = "API4:2023 Unrestricted Resource Consumption"
@@ -211,6 +180,7 @@ class BatchQueryDoSTest(VulnerabilityTest):
         self.client = client
 
     def run(self) -> list[VulnerabilityResult]:
+        """Runs a small-batch control and a large-batch detection check."""
         cfg = self.client.scan_config.get("batch_query_dos", {})
         probe_query = cfg.get("probe_query", "{ systemHealth }")
         control_size = cfg.get("control_batch_size", 2)
@@ -224,7 +194,7 @@ class BatchQueryDoSTest(VulnerabilityTest):
     def _test_control_small_batch_succeeds(
         self, probe_query: str, control_size: int
     ) -> VulnerabilityResult:
-        """Baseline: a small, legitimate-sized batch must succeed."""
+        """Control (baseline): a small, legitimate-sized batch must succeed."""
         resp = self.client.execute_batch([probe_query] * control_size)
         data: Any = _parse_json(resp) or []
 

@@ -1,14 +1,5 @@
 """
 GraphQL Information Disclosure tests (DVGA).
-
-`IntrospectionExposureTest` and `FieldSuggestionInfoDisclosureTest` both
-confirm ways an attacker can enumerate DVGA's schema without a legitimate
-introspection query ever being intentionally exposed. They are distinct
-findings: introspection exposure is a difficulty-mode toggle, while field
-suggestions leak schema field names even when introspection is disabled,
-because graphql-core computes them during query validation — a phase that
-runs before any of DVGA's resolver-level middleware, including
-`IntrospectionMiddleware`, ever executes.
 """
 
 from __future__ import annotations
@@ -38,15 +29,7 @@ def _parse_json(resp: requests.Response) -> Optional[dict[str, Any]]:
 
 
 class IntrospectionExposureTest(VulnerabilityTest):
-    """
-    Confirms whether DVGA's `__schema` introspection field is reachable.
-
-    `IntrospectionMiddleware` rejects any query resolving `__schema`, but
-    only when the server is in hard difficulty mode — the check is skipped
-    entirely under `helpers.is_level_easy()`. DVGA ships in easy mode by
-    default on a fresh container, so introspection is exposed out of the
-    box rather than needing to be turned on.
-    """
+    """Confirms whether DVGA's `__schema` introspection field is reachable."""
 
     name = "introspection_exposure"
     owasp_category = "API8:2023 Security Misconfiguration"
@@ -70,7 +53,7 @@ class IntrospectionExposureTest(VulnerabilityTest):
     def _test_hard_mode_blocks_introspection(
         self, probe_query: str
     ) -> VulnerabilityResult:
-        """Baseline: hard mode's IntrospectionMiddleware must reject `__schema`."""
+        """Control (baseline): hard mode's IntrospectionMiddleware must reject `__schema`."""
         resp = self.client.query(probe_query)
         data = _parse_json(resp) or {}
         errors = data.get("errors")
@@ -123,13 +106,6 @@ class FieldSuggestionInfoDisclosureTest(VulnerabilityTest):
     """
     Confirms whether a misspelled field name leaks real field names via
     graphql-core's built-in "Did you mean" suggestion error.
-
-    This is tested with the server left in hard mode (introspection
-    disabled) specifically to show the leak is independent of
-    `IntrospectionExposureTest`: query validation — where suggestions are
-    computed — runs before DVGA's field-resolution middleware, so
-    disabling introspection does not prevent schema enumeration through
-    this error-message oracle.
     """
 
     name = "field_suggestion_info_disclosure"
@@ -155,7 +131,7 @@ class FieldSuggestionInfoDisclosureTest(VulnerabilityTest):
         ]
 
     def _test_valid_field_no_error(self, valid_query: str) -> VulnerabilityResult:
-        """Baseline: a correctly spelled field must resolve without a validation error."""
+        """Control (baseline): a correctly spelled field must resolve without a validation error."""
         resp = self.client.query(valid_query)
         data = _parse_json(resp) or {}
         errors = data.get("errors")
