@@ -1,13 +1,5 @@
 """
 GraphQL Injection tests (DVGA).
-
-`PastesFilterSQLiTest` targets the `pastes(filter: String)` argument, which
-is concatenated unsanitised into a raw SQLAlchemy `text()` fragment.
-`SystemDebugCommandInjectionTest` targets the `systemDebug(arg: String)`
-argument, which is passed unsanitised into a shell command. Both run
-independently of DVGA's difficulty mode — neither the depth, cost,
-introspection, nor operation-name middleware inspects field arguments, so
-these findings hold in both easy and hard mode.
 """
 
 from __future__ import annotations
@@ -38,16 +30,7 @@ def _parse_json(resp: requests.Response) -> Optional[dict[str, Any]]:
 
 
 class PastesFilterSQLiTest(VulnerabilityTest):
-    """
-    Confirms SQL injection in DVGA's `pastes(filter: String)` argument.
-
-    `resolve_pastes` builds `title = '<filter>' or content = '<filter>'` as
-    a raw, unparenthesised SQL fragment and appends it to a query already
-    scoped by `.filter_by(public=public, burn=False)`. Because the fragment
-    is not wrapped in parentheses, an OR tautology in `filter` outranks the
-    surrounding `public`/`burn` scoping by SQL operator precedence, so a
-    request for `public: true` returns private pastes too.
-    """
+    """ Confirms SQL injection in DVGA's `pastes(filter: String)` argument."""
 
     name = "pastes_filter_sqli"
     owasp_category = "API8:2023 Security Misconfiguration"
@@ -60,6 +43,10 @@ class PastesFilterSQLiTest(VulnerabilityTest):
         ).get("tautology_payload_template", "{canary}' OR '1'='1")
 
     def run(self) -> list[VulnerabilityResult]:
+        """
+        Creates a private "canary" paste (unique, unguessable title) 
+        to use as bait, then runs the checks.
+        """
         canary_title = self._setup_private_canary_paste()
         if canary_title is None:
             return [
@@ -84,7 +71,7 @@ class PastesFilterSQLiTest(VulnerabilityTest):
         ]
 
     def _setup_private_canary_paste(self) -> Optional[str]:
-        """Create a private paste whose title cannot be guessed, so a later leak is unambiguous."""
+        """Creates a private paste whose title cannot be guessed, so a later leak is unambiguous."""
         canary_title = f"sqli_canary_{uuid.uuid4().hex[:12]}"
         try:
             resp = self.client.create_paste(
@@ -105,7 +92,10 @@ class PastesFilterSQLiTest(VulnerabilityTest):
     def _test_control_literal_filter_excludes_private(
         self, canary_title: str
     ) -> VulnerabilityResult:
-        """Baseline: a literal, non-matching filter must not surface the private canary paste."""
+        """
+        Control (baseline): a literal, non-matching filter must not 
+        surface the private canary paste.
+        """
         control_filter = f"nonexistent_{uuid.uuid4().hex[:10]}"
         resp = self.client.pastes(public=True, filter=control_filter)
         data = _parse_json(resp) or {}
@@ -127,7 +117,10 @@ class PastesFilterSQLiTest(VulnerabilityTest):
     def _test_tautology_bypasses_public_scope(
         self, canary_title: str
     ) -> VulnerabilityResult:
-        """Bypass: an OR tautology in `filter` surfaces a private paste through a public-only query."""
+        """
+        Bypass: an OR tautology in `filter` surfaces a private paste 
+        through a public-only query.
+        """
         nonmatching_token = f"nonexistent_{uuid.uuid4().hex[:10]}"
         payload = self.payload_template.format(canary=nonmatching_token)
         resp = self.client.pastes(public=True, filter=payload)
@@ -163,15 +156,7 @@ class PastesFilterSQLiTest(VulnerabilityTest):
 
 
 class SystemDebugCommandInjectionTest(VulnerabilityTest):
-    """
-    Confirms OS command injection in DVGA's `systemDebug(arg: String)` argument.
-
-    `resolve_system_debug` passes `arg` directly into
-    `os.popen('ps {}'.format(arg)).read()` with no sanitisation, unlike
-    `systemDiagnostics` (gated behind admin credential validation) or
-    `importPaste` (its host/path are stripped of `;`/`&` in hard mode).
-    `systemDebug` has neither control, in either difficulty mode.
-    """
+    """Confirms OS command injection in DVGA's `systemDebug(arg: String)` argument."""
 
     name = "system_debug_command_injection"
     owasp_category = "API8:2023 Security Misconfiguration"
@@ -190,7 +175,7 @@ class SystemDebugCommandInjectionTest(VulnerabilityTest):
         ]
 
     def _test_control_benign_arg(self) -> VulnerabilityResult:
-        """Baseline: a benign argument must run cleanly with no injected commands."""
+        """Control (baseline): a benign argument must run cleanly with no injected commands."""
         resp = self.client.system_debug(arg="aux")
         data = _parse_json(resp) or {}
         output = data.get("data", {}).get("systemDebug")
