@@ -30,7 +30,7 @@ VAMPI_SEEDED_CREDENTIALS = {"name1": "pass1", "name2": "pass2", "admin": "pass1"
 class ExcessiveUserDataExposureTest(VulnerabilityTest):
     """
     Confirms whether Juice Shop's authentication-details endpoint leaks
-    other users' data to an ordinary, non-admin authenticated user.
+    other users' data to non-admin authenticated user.
     """
 
     name = "excessive_user_data_exposure"
@@ -48,6 +48,7 @@ class ExcessiveUserDataExposureTest(VulnerabilityTest):
         )
 
     def run(self) -> list[VulnerabilityResult]:
+        """Logs in as new account and runs the checks."""
         self._fresh_synthetic_login("requester")
         return [
             self._test_exposure(),
@@ -55,11 +56,7 @@ class ExcessiveUserDataExposureTest(VulnerabilityTest):
         ]
 
     def _fresh_synthetic_login(self, role: str) -> None:
-        """Mirrors authorization.py's `_fresh_synthetic_juiceshop_login` —
-        Juice Shop has no reseed endpoint reachable mid-session and a
-        duplicate email 400s (see src/utils/juiceshop_client.py), so each
-        run needs its own fresh identity.
-        """
+        """Creates and logins as a disposable test account."""
         user = self.client.test_users[role]
         suffix = uuid.uuid4().hex[:10]
         user["email"] = f"{role}.{suffix}@juiceshop-test.local"
@@ -67,6 +64,11 @@ class ExcessiveUserDataExposureTest(VulnerabilityTest):
         self.client.login(role)
 
     def _test_exposure(self) -> VulnerabilityResult:
+        """
+        Fetches the "authentication details" endpoint as non-admin authenticated user and 
+        checks whether the response contains other people's emails or unmasked 
+        (plaintext-looking) passwords.
+        """
         resp = self.client.get_user_exposure(as_user="requester")
         path = self.client.endpoints.get(
             "user_exposure", "/rest/user/authentication-details"
@@ -148,6 +150,11 @@ class ExcessiveUserDataExposureTest(VulnerabilityTest):
         )
 
     def _test_unauthenticated_rejected(self) -> VulnerabilityResult:
+        """
+        Control (baseline): Confirms the endpoint at least requires login 
+        (so the finding is about over-sharing to a logged-in user, 
+        not a missing login check).
+        """
         resp = self.client.get_user_exposure(as_user=None)
         path = self.client.endpoints.get(
             "user_exposure", "/rest/user/authentication-details"
@@ -191,6 +198,7 @@ class VAmPIDebugEndpointExposureTest(VulnerabilityTest):
         self.client = client
 
     def run(self) -> list[VulnerabilityResult]:
+        """Seeds the database, logs in as an attacker, and runs the check."""
         self.client.seed_database()
         self.client.register("attacker")
         self.client.login("attacker")
@@ -200,7 +208,7 @@ class VAmPIDebugEndpointExposureTest(VulnerabilityTest):
         ]
 
     def _evaluate(self, resp: requests.Response) -> tuple[bool, bool, int]:
-        """Returns (leaked, passwords_plaintext, record_count)."""
+        """Inspects a response and records (leaked, passwords_plaintext, record_count)."""
         if resp.status_code != 200:
             return False, False, 0
         try:
@@ -221,6 +229,10 @@ class VAmPIDebugEndpointExposureTest(VulnerabilityTest):
         return bool(records), bool(plaintext_matches), len(records)
 
     def _test_unauthenticated_exposure(self) -> VulnerabilityResult:
+        """
+        Tests debug endpoint with no login and checks whether it dumps 
+        every user's record, including plaintext passwords.
+        """
         path = self.client.endpoints.get("debug", "/users/v1/_debug")
         resp = self.client.get_debug(as_user=None)
         leaked, plaintext, count = self._evaluate(resp)
@@ -248,7 +260,8 @@ class VAmPIDebugEndpointExposureTest(VulnerabilityTest):
         )
 
     def _test_authenticated_low_priv_exposure(self) -> VulnerabilityResult:
-        """Retest with a valid, non-admin token attached — confirms the
+        """
+        Retest with a valid, non-admin token attached — confirms the
         endpoint has no access control gate at all, not merely a missing
         one for unauthenticated callers.
         """
