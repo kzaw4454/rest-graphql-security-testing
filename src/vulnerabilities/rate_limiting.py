@@ -43,10 +43,17 @@ class LoginBruteForceRateLimitTest(VulnerabilityTest):
         )
 
     def run(self) -> list[VulnerabilityResult]:
+        """Seeds the database, and runs the checks"""
         self.client.seed_database()
         return [self._test_unthrottled_login_attempts()]
 
     def _test_unthrottled_login_attempts(self) -> VulnerabilityResult:
+        """
+        Submits multiple (repeatedly) wrong password for a known username and
+        records status code and response time.
+
+        No throttled (HTTP 429 Too Many Requests) or slow down - vulnerability exists.
+        """
         path = self.client.endpoints.get("login", "/users/v1/login")
         statuses: list[int] = []
         latencies: list[float] = []
@@ -98,13 +105,7 @@ class LoginBruteForceRateLimitTest(VulnerabilityTest):
 
 
 def _fresh_synthetic_login(client: CrAPIClient, role: str) -> None:
-    """Sign up and log in a brand-new synthetic identity for `role`.
-
-    crAPI enforces unique email *and* phone number per account and has no
-    reseed endpoint, so each test run needs its own fresh identity rather
-    than reusing config's static test_users values, which would 403
-    ("already registered") on a second run.
-    """
+    """Sign up and log in a new identity (crAPI test account) for `role`."""
     user = client.test_users[role]
     suffix = uuid.uuid4().hex[:10]
     user["email"] = f"{role}.{suffix}@crapi-test.local"
@@ -133,10 +134,14 @@ class CrAPILoginBruteForceRateLimitTest(VulnerabilityTest):
         )
 
     def run(self) -> list[VulnerabilityResult]:
+        """Logins as new user and runs the check."""
         _fresh_synthetic_login(self.client, "victim")
         return [self._test_unthrottled_login_attempts()]
 
     def _test_unthrottled_login_attempts(self) -> VulnerabilityResult:
+        """
+        Attempts multiple login to crAPI's endpoint.
+        """
         path = self.client.endpoints.get("login", "/identity/api/auth/login")
         email = self.client.test_users["victim"]["email"]
         statuses: list[int] = []
