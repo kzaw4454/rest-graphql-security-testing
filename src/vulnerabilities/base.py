@@ -24,6 +24,14 @@ class AssertionRole(str, Enum):
     ADJACENT = "adjacent"   # control that failed and IS itself a real, separate, in-scope finding
 
 
+class ResultSource(str, Enum):
+    """Which tool produced a result — orthogonal to assertion_role."""
+
+    FRAMEWORK = "framework"       # this project's own vulnerability test modules
+    ZAP = "zap"                   # OWASP ZAP benchmark scan
+    GRAPHQL_COP = "graphql_cop"   # GraphQL Cop benchmark scan
+
+
 @dataclass
 class VulnerabilityResult:
     """
@@ -41,6 +49,7 @@ class VulnerabilityResult:
     request_summary: Optional[str] = None  # e.g. method + path, redacted of secrets
     response_summary: Optional[str] = None  # e.g. status code + relevant snippet
     assertion_role: AssertionRole = AssertionRole.DETECTION
+    source: ResultSource = ResultSource.FRAMEWORK
     timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

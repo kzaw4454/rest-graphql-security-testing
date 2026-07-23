@@ -107,6 +107,7 @@ class RunLogger:
                     record = asdict(result)
                     record["severity"] = result.severity.value
                     record["assertion_role"] = result.assertion_role.value
+                    record["source"] = result.source.value
                     record["run_id"] = self.run_id
                     record["record_type"] = "result"
                     f.write(json.dumps(record) + "\n")

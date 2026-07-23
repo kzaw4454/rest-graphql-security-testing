@@ -12,7 +12,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+import pandas as pd
 import yaml
+
+from src.vulnerabilities.base import ResultSource
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +23,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_LOG_ROOT = REPO_ROOT / "results" / "logs"
 ANALYSIS_OUTPUT_ROOT = REPO_ROOT / "results" / "analysis"
 GROUND_TRUTH_PATH = REPO_ROOT / "config" / "ground_truth.yaml"
+BENCHMARK_MAPPING_PATH = REPO_ROOT / "config" / "benchmark_mapping.yaml"
 
 # Row-level metrics only ever count assertions that test the module's target
 # vulnerability. A CONTROL row failing means a baseline assumption broke, not
@@ -37,7 +41,10 @@ class LoggedResult:
     target: str
     passed: bool
     severity: str
+    evidence: str
     assertion_role: str
+    source: str
+    extra: dict[str, Any]
     run_id: str
     timestamp: str
 
@@ -143,7 +150,14 @@ def load_latest_results(
                     target=record["target"],
                     passed=record["passed"],
                     severity=record["severity"],
+                    evidence=record["evidence"],
                     assertion_role=record["assertion_role"],
+                    # Records logged before ResultSource existed predate the
+                    # field entirely; they are all this framework's own
+                    # modules, so FRAMEWORK is the correct default rather
+                    # than a backfill requirement.
+                    source=record.get("source", ResultSource.FRAMEWORK.value),
+                    extra=record.get("extra", {}),
                     run_id=record["run_id"],
                     timestamp=record["timestamp"],
                 )
@@ -168,14 +182,127 @@ def load_ground_truth(
     return entries
 
 
+def load_benchmark_mapping(
+    path: Path = BENCHMARK_MAPPING_PATH,
+) -> list[dict[str, Any]]:
+    """
+    Test-case pairings between this framework's own modules and the
+    external benchmarking tools (ZAP, GraphQL Cop), one entry per row of
+    the dissertation's test case plan that has a benchmark counterpart.
+    """
+    with path.open("r") as f:
+        entries = yaml.safe_load(f) or []
+    return entries
+
+
+_TOOL_SOURCE = {
+    "zap": ResultSource.ZAP.value,
+    "graphql_cop": ResultSource.GRAPHQL_COP.value,
+}
+
+
+def benchmark_comparison(target: str) -> pd.DataFrame:
+    """
+    Joins this framework's own detection results against the corresponding
+    benchmark tool's results for every config/benchmark_mapping.yaml entry
+    scoped to `target`.
+
+    Framework and tool rows are joined on `test_name`: a mapping entry's
+    `framework_test_name` (a single test_name, or a list when the plan's
+    test case spans more than one framework module) names the exact
+    test_name value both this framework's module and the benchmark
+    runner's logged rows share for that test case, distinguished only by
+    `source`. A row with no logged results yet for one side reports that
+    side's `*_detected` as None rather than False, since "not run" and
+    "run and found nothing" are different states for the dissertation's
+    data to distinguish.
+
+    Tool rows tagged `extra={"inconclusive": True}` are excluded from
+    `tool_rows` entirely, so a benchmark runner's own setup failure (e.g.
+    zap_runner.py couldn't build a valid scan URL, or a tool subprocess
+    never actually ran) falls back to the same `tool_detected=None`
+    behaviour as if no row existed at all -- not `False`, which would
+    misrepresent "the tool never ran" as "the tool ran and found nothing".
+    """
+    columns = [
+        "id",
+        "test_case",
+        "app",
+        "tool",
+        "classification",
+        "framework_detected",
+        "tool_detected",
+        "framework_evidence",
+        "tool_evidence",
+    ]
+    mapping = [
+        entry for entry in load_benchmark_mapping() if entry["app"] == target
+    ]
+    if not mapping:
+        return pd.DataFrame(columns=columns)
+
+    results = load_latest_results(target)
+
+    rows: list[dict[str, Any]] = []
+    for entry in mapping:
+        framework_test_names = entry["framework_test_name"]
+        if isinstance(framework_test_names, str):
+            framework_test_names = [framework_test_names]
+        tool_source = _TOOL_SOURCE[entry["tool"]]
+
+        framework_rows = [
+            r
+            for r in results
+            if r.test_name in framework_test_names
+            and r.source == ResultSource.FRAMEWORK.value
+            and r.assertion_role in FINDING_ROLES
+        ]
+        tool_rows = [
+            r
+            for r in results
+            if r.test_name in framework_test_names
+            and r.source == tool_source
+            and not r.extra.get("inconclusive")
+        ]
+
+        rows.append(
+            {
+                "id": entry["id"],
+                "test_case": entry["test_case"],
+                "app": entry["app"],
+                "tool": entry["tool"],
+                "classification": entry["classification"],
+                "framework_detected": (
+                    any(not r.passed for r in framework_rows)
+                    if framework_rows
+                    else None
+                ),
+                "tool_detected": (
+                    any(not r.passed for r in tool_rows) if tool_rows else None
+                ),
+                "framework_evidence": "; ".join(r.evidence for r in framework_rows),
+                "tool_evidence": "; ".join(r.evidence for r in tool_rows),
+            }
+        )
+
+    return pd.DataFrame(rows, columns=columns)
+
+
 def compute_row_level_metrics(
     target: str, results: list[LoggedResult]
 ) -> RowLevelMetrics:
     """
     TP/FN from DETECTION/ADJACENT rows only: passed=False -> TP (vulnerability
-    confirmed), passed=True -> FN.
+    confirmed), passed=True -> FN. Benchmark tool rows (source=zap/graphql_cop)
+    are excluded — this framework's own detection rate must not be inflated
+    by a separate tool's results logged alongside it.
     """
-    finding_rows = [r for r in results if r.assertion_role in FINDING_ROLES]
+    finding_rows = [
+        r
+        for r in results
+        if r.assertion_role in FINDING_ROLES
+        and r.source == ResultSource.FRAMEWORK.value
+    ]
     true_positives = sum(1 for r in finding_rows if not r.passed)
     false_negatives = sum(1 for r in finding_rows if r.passed)
     total = len(finding_rows)
@@ -212,7 +339,9 @@ def compute_vulnerability_coverage(
     confirmed_test_names = {
         r.test_name
         for r in results
-        if r.assertion_role in FINDING_ROLES and not r.passed
+        if r.assertion_role in FINDING_ROLES
+        and not r.passed
+        and r.source == ResultSource.FRAMEWORK.value
     }
 
     documented_count = sum(v["instance_count"] for v in ground_truth)

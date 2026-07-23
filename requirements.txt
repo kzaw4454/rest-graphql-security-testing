@@ -10,7 +10,15 @@ graphene>=3.3
 
 # Security Testing & Benchmarking
 python-owasp-zap-v2.4>=0.0.21
-#graphql-cop>=1.13
+# graphql-cop is not a pip-installable package at all (no setup.py/
+# pyproject.toml -- confirmed against the actual dolevf/graphql-cop repo)
+# and its own pinned deps (requests==2.25.1) conflict with this project's
+# requests requirement (zapv2/docker need >=2.31.0), so it is vendored as
+# source with its own isolated venv instead of listed here. See
+# notes/notes_benchmarks/graphql_cop_runner.md for the exact setup:
+#   git clone https://github.com/dolevf/graphql-cop.git benchmarks/graphql-cop
+#   python3 -m venv benchmarks/graphql-cop/venv
+#   benchmarks/graphql-cop/venv/bin/pip install -r benchmarks/graphql-cop/requirements.txt
 pyjwt>=2.8.0
 cryptography>=41.0.3
 bandit>=1.7.5

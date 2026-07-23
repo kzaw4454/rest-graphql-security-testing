@@ -1,0 +1,81 @@
+# OWASP ZAP benchmark daemons for the REST targets (see
+# src/analysis/comparative_stats.py's benchmark_comparison() and
+# benchmarks/zap_runner.py). One service per target rather than a single
+# shared ZAP instance, since each REST target's own compose file already
+# creates its own isolated bridge network with no shared top-level compose
+# file to join instead (docker/ has one file per target, no orchestration
+# layer above them) — this keeps that same one-file-per-concern shape and
+# lets a single target be benchmarked without bringing up the others.
+#
+# Each zap-<target> service is only reachable if that target's own stack
+# (docker-compose.vampi.yml / .crapi.yml / .juiceshop.yml) is already
+# running, since it joins that stack's network as `external`. Bring the
+# target up first, then this file, e.g.:
+#   docker-compose -f docker/docker-compose.vampi.yml up -d
+#   docker-compose -f docker/docker-compose.zap.yml up -d zap-vampi
+#
+# The API key below is a fixed, local-only value guarding a daemon that is
+# never reachable outside 127.0.0.1 and the target's own isolated Docker
+# network — not a credential for a real account or service — so it is
+# checked in rather than sourced from a gitignored config file, matching
+# how this compose file itself (unlike config/*.yaml) is not gitignored.
+# benchmarks/zap_runner.py reads the matching value from each target's
+# config/<target>.yaml `zap:` block.
+
+services:
+  zap-vampi:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    container_name: zap-vampi
+    command: >-
+      zap.sh -daemon -host 0.0.0.0 -port 8080
+      -config api.key=vampi-zap-benchmark-key
+      -config api.addrs.addr.name=.*
+      -config api.addrs.addr.regex=true
+    ports:
+      - "127.0.0.1:8090:8080"
+    networks:
+      - vampi-net
+
+  zap-crapi:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    container_name: zap-crapi
+    command: >-
+      zap.sh -daemon -host 0.0.0.0 -port 8080
+      -config api.key=crapi-zap-benchmark-key
+      -config api.addrs.addr.name=.*
+      -config api.addrs.addr.regex=true
+    ports:
+      - "127.0.0.1:8091:8080"
+    networks:
+      - crapi-net
+
+  zap-juiceshop:
+    image: ghcr.io/zaproxy/zaproxy:stable
+    container_name: zap-juiceshop
+    command: >-
+      zap.sh -daemon -host 0.0.0.0 -port 8080
+      -config api.key=juiceshop-zap-benchmark-key
+      -config api.addrs.addr.name=.*
+      -config api.addrs.addr.regex=true
+    ports:
+      - "127.0.0.1:8092:8080"
+    networks:
+      - juiceshop-net
+
+networks:
+  # External network names are Compose's actual resolved names, not the
+  # short names each target's own compose file uses internally — confirmed
+  # via `docker compose -f docker/docker-compose.<target>.yml config`.
+  # docker-compose.crapi.yml sets `name: crapi` at the top level, so its
+  # default network resolves to crapi_default; the other three target
+  # files set no top-level `name:`, so Compose prefixes their network with
+  # "docker" (this directory's basename) instead.
+  vampi-net:
+    external: true
+    name: docker_vampi-net
+  crapi-net:
+    external: true
+    name: crapi_default
+  juiceshop-net:
+    external: true
+    name: docker_juiceshop-net

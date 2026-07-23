@@ -246,7 +246,11 @@ vulnerable_apps/**/data/
 benchmarks/**/output/
 benchmarks/**/*.json
 benchmarks/**/*.html
-!benchmarks/**/notes/
+
+# Vendored graphql-cop checkout + its isolated venv (see
+# benchmarks/graphql_cop_runner.py's docstring) -- third-party source and a
+# virtualenv, not this project's own code
+benchmarks/graphql-cop/
 
 # Anything accidentally pinned locally for vulnerable apps (keep configs, not runtime state)
 vulnerable_apps/**/*.db
@@ -254,5 +258,13 @@ vulnerable_apps/**/*.sqlite3
 
 # Personal notes
 notes/
+
+# benchmarks/notes/ is a tracked exception to the blanket notes/ ignore
+# above (unlike notes/, it documents that Burp Suite benchmarking is
+# manual/out of automated scope, not private working rationale) -- must
+# come after the notes/ rule above, since git uses the last matching
+# pattern for a given path.
+!benchmarks/**/notes/
+!benchmarks/**/notes/**
 
 src2/
