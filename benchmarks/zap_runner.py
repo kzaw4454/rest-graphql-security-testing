@@ -13,6 +13,7 @@ section.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import time
 from typing import Any, Optional
@@ -23,6 +24,7 @@ from zapv2 import ZAPv2
 
 from src.analysis.comparative_stats import load_benchmark_mapping
 from src.utils.results_logger import RunLogger
+from src.utils.vampi_client import VAmPIClient
 from src.vulnerabilities.base import (
     Severity,
     VulnerabilityResult,
@@ -121,6 +123,16 @@ ALERT_NAME_HINTS: dict[str, Optional[tuple[str, ...]]] = {
     "bola_basket_access": None,
 }
 
+# Placeholder JSON bodies for benchmark_mapping.yaml entries whose target_spec
+# declares method: POST (currently crAPI's two coupon endpoints, rest_04).
+# These only need to be syntactically valid and harmless -- once the message
+# shape is on record in ZAP via send_request(), ZAP's own active scan
+# supplies its own payload values for the coupon_code field.
+POST_BODY_BY_TEST_NAME: dict[str, dict[str, Any]] = {
+    "nosqli_coupon_validate": {"coupon_code": "TEST10"},
+    "sqli_apply_coupon": {"coupon_code": "TEST10", "amount": 1},
+}
+
 
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else [value]
@@ -150,9 +162,7 @@ def _connect(zap_config: dict[str, Any]) -> tuple[ZAPv2, bool]:
     from ZAP itself after setting it, not assumed to have taken effect.
     """
     proxy = f"http://{zap_config['host']}:{zap_config['port']}"
-    zap = ZAPv2(
-        apikey=zap_config["api_key"], proxies={"http": proxy, "https": proxy}
-    )
+    zap = ZAPv2(apikey=zap_config["api_key"], proxies={"http": proxy, "https": proxy})
 
     desired = TARGET_INJECTABLE_DEFAULT | TARGET_URLPATH
     zap.ascan.set_option_target_params_injectable(desired)
@@ -167,20 +177,30 @@ def _connect(zap_config: dict[str, Any]) -> tuple[ZAPv2, bool]:
         actual,
         status,
     )
-    print(f"[zap config] target_params_injectable={actual} (URL path segment injection {status})")
+    print(
+        f"[zap config] target_params_injectable={actual} (URL path segment injection {status})"
+    )
 
     return zap, path_injection_confirmed
 
 
-def _resolve_vampi_book_title(internal_base_url: str) -> Optional[str]:
+def _resolve_vampi_book_title(host_base_url: Optional[str]) -> Optional[str]:
     """
     VAmPI's `/books/v1/{book_title}` (row 5, jwt_weak_signing_bypass) needs
     a real book title for ZAP's active scan to probe a genuine resource
     rather than a 404. This listing endpoint requires no auth, matching
     src/vulnerabilities/authentication.py's own discovery step.
+
+    This request runs directly from this script on the host, not proxied
+    through ZAP's daemon, so it must hit VAmPI's host-published base_url --
+    the internal Docker Compose service hostname (INTERNAL_TARGET_BASE_URL)
+    is only resolvable from inside the target's own Docker network, where
+    ZAP's daemon lives, not from a plain requests.get() made from the host.
     """
+    if host_base_url is None:
+        return None
     try:
-        resp = requests.get(f"{internal_base_url}/books/v1", timeout=10)
+        resp = requests.get(f"{host_base_url}/books/v1", timeout=10)
     except requests.exceptions.RequestException:
         return None
     if resp.status_code != 200:
@@ -195,7 +215,7 @@ def _resolve_vampi_book_title(internal_base_url: str) -> Optional[str]:
 
 
 def _resolve_endpoint_placeholders(
-    endpoint: str, internal_base_url: str
+    endpoint: str, internal_base_url: str, host_base_url: Optional[str]
 ) -> Optional[str]:
     """
     Resolves every `{...}` path template in `endpoint` to a concrete value.
@@ -207,7 +227,7 @@ def _resolve_endpoint_placeholders(
     resolved (caller should log a setup-failure result and skip the scan).
     """
     if "{book_title}" in endpoint:
-        book_title = _resolve_vampi_book_title(internal_base_url)
+        book_title = _resolve_vampi_book_title(host_base_url)
         if book_title is None:
             return None
         endpoint = endpoint.format(book_title=book_title)
@@ -261,8 +281,30 @@ def _poll_until_complete(
         time.sleep(poll_interval)
 
 
+def _build_raw_post_request(url: str, json_body: dict[str, Any]) -> str:
+    """
+    Builds a raw HTTP request string in the request-line + headers + CRLF +
+    body shape ZAP's core.send_request() API expects (an absolute-URI
+    request line, per ZAP's own documented usage of this action, removes
+    any ambiguity about which host ZAP should connect to when relaying the
+    message through its own proxy plumbing).
+    """
+    body = json.dumps(json_body)
+    body_bytes = body.encode("utf-8")
+    return (
+        f"POST {url} HTTP/1.1\r\n"
+        "Content-Type: application/json\r\n"
+        f"Content-Length: {len(body_bytes)}\r\n"
+        "\r\n"
+        f"{body}"
+    )
+
+
 def _scan_target(
-    zap: ZAPv2, url: str
+    zap: ZAPv2,
+    url: str,
+    method: str = "GET",
+    json_body: Optional[dict[str, Any]] = None,
 ) -> tuple[list[dict[str, Any]], list[str], bool]:
     """
     Runs spider then active scan against `url`, returning
@@ -272,9 +314,18 @@ def _scan_target(
     scan, so a timeout still returns whatever partial alerts exist while a
     rejection returns none at all and flags the result as inconclusive to
     the caller.
+
+    For method="POST", the seed request is submitted via ZAP's
+    core.send_request() (a raw request ZAP records into its history with
+    the real method/content-type/body) instead of the GET-only
+    core.access_url() -- otherwise ZAP's active scan never sees a message
+    shaped like the real POST request and has no JSON field to mutate.
     """
     caveats: list[str] = []
-    zap.core.access_url(url)
+    if method == "POST":
+        zap.core.send_request(_build_raw_post_request(url, json_body or {}))
+    else:
+        zap.core.access_url(url)
 
     spider_id = zap.spider.scan(url)
     outcome, caveat = _poll_until_complete(
@@ -334,8 +385,13 @@ def _result_from_scan(
     requires_auth: bool,
     rejected: bool,
     path_injection_confirmed: bool,
+    method: str = "GET",
 ) -> VulnerabilityResult:
-    request_summary = f"ZAP spider + active scan: {url}"
+    request_summary = (
+        f"ZAP spider + active scan: {method} {url}"
+        if method == "POST"
+        else f"ZAP spider + active scan: {url}"
+    )
 
     if rejected:
         evidence = f"ZAP rejected the scan request for {url} outright -- no alerts were collected."
@@ -357,8 +413,7 @@ def _result_from_scan(
 
     hints = ALERT_NAME_HINTS.get(test_name)
     all_alert_names = (
-        ", ".join(sorted({a.get("alert", "unnamed alert") for a in alerts}))
-        or "none"
+        ", ".join(sorted({a.get("alert", "unnamed alert") for a in alerts})) or "none"
     )
 
     if hints is None:
@@ -398,8 +453,7 @@ def _result_from_scan(
         (risk for risk in RISK_ORDER if risk in alert_risks), "Informational"
     )
     matched_alert_names = (
-        ", ".join(sorted({a.get("alert", "unnamed alert") for a in matched}))
-        or "none"
+        ", ".join(sorted({a.get("alert", "unnamed alert") for a in matched})) or "none"
     )
 
     evidence = (
@@ -436,7 +490,10 @@ def _result_from_scan(
 
 
 def _run_entry(
-    zap: ZAPv2, entry: dict[str, Any], path_injection_confirmed: bool
+    zap: ZAPv2,
+    entry: dict[str, Any],
+    path_injection_confirmed: bool,
+    host_base_url: Optional[str],
 ) -> list[VulnerabilityResult]:
     app = entry["app"]
     internal_base_url = INTERNAL_TARGET_BASE_URL[app]
@@ -448,7 +505,7 @@ def _run_entry(
     results: list[VulnerabilityResult] = []
     for test_name, category, target_spec in zip(test_names, categories, targets):
         endpoint = _resolve_endpoint_placeholders(
-            target_spec["endpoint"], internal_base_url
+            target_spec["endpoint"], internal_base_url, host_base_url
         )
         if endpoint is None:
             results.append(
@@ -471,7 +528,11 @@ def _run_entry(
             continue
 
         url = f"{internal_base_url}{endpoint}"
-        alerts, caveats, rejected = _scan_target(zap, url)
+        method = target_spec.get("method", "GET")
+        json_body = POST_BODY_BY_TEST_NAME.get(test_name) if method == "POST" else None
+        alerts, caveats, rejected = _scan_target(
+            zap, url, method=method, json_body=json_body
+        )
         results.append(
             _result_from_scan(
                 test_name=test_name,
@@ -483,6 +544,7 @@ def _run_entry(
                 requires_auth=bool(target_spec.get("requires_auth")),
                 rejected=rejected,
                 path_injection_confirmed=path_injection_confirmed,
+                method=method,
             )
         )
     return results
@@ -502,10 +564,18 @@ def _run_app(app: str) -> None:
     zap_config = _load_zap_connection(app)
     zap, path_injection_confirmed = _connect(zap_config)
 
+    host_base_url: Optional[str] = None
+    if app == "vampi":
+        vampi_client = VAmPIClient.from_config("config/vampi.yaml")
+        host_base_url = vampi_client.base_url
+        reseed_resp = vampi_client.seed_database()
+        logger.info(
+            "VAmPI /createdb reseed before ZAP benchmark: %s", reseed_resp.status_code
+        )
+        print(f"[vampi reseed] /createdb -> {reseed_resp.status_code}")
+
     entries = [
-        e
-        for e in load_benchmark_mapping()
-        if e["tool"] == "zap" and e["app"] == app
+        e for e in load_benchmark_mapping() if e["tool"] == "zap" and e["app"] == app
     ]
     if not entries:
         logger.info("No 'tool: zap' benchmark_mapping.yaml entries for '%s'", app)
@@ -514,7 +584,9 @@ def _run_app(app: str) -> None:
     with RunLogger("rest", app, f"config/{app}.yaml") as run:
         all_results: list[VulnerabilityResult] = []
         for entry in entries:
-            entry_results = _run_entry(zap, entry, path_injection_confirmed)
+            entry_results = _run_entry(
+                zap, entry, path_injection_confirmed, host_base_url
+            )
             run.log_results(entry_results)
             all_results.extend(entry_results)
     _print_results(all_results)

@@ -88,6 +88,15 @@ MECHANISM_CAVEATS: dict[str, str] = {
     ),
 }
 
+# Test names whose mapped graphql-cop check (see CHECK_NAME_HINTS) tests a
+# genuinely different mechanism than this framework's own test for the same
+# row (see MECHANISM_CAVEATS) -- a match from graphql-cop here does not
+# confirm it detected the same vulnerability, so these are never counted as
+# a detection regardless of what graphql-cop's report says. The evidence
+# text still reports graphql-cop's actual result and the mechanism caveat,
+# so the mismatch stays visible rather than silently forcing a clean pass.
+MECHANISM_MISMATCH_TEST_NAMES = {"deep_nesting_dos"}
+
 
 def _as_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else [value]
@@ -216,13 +225,17 @@ def _result_for_entry(
     if test_name in MECHANISM_CAVEATS:
         evidence += f" {MECHANISM_CAVEATS[test_name]}"
 
+    passed = not vulnerable
+    if test_name in MECHANISM_MISMATCH_TEST_NAMES:
+        passed = True
+
     return VulnerabilityResult(
         test_name=test_name,
         owasp_category=owasp_category,
         architecture="graphql",
         target="dvga",
-        passed=not vulnerable,
-        severity=Severity.MEDIUM if vulnerable else Severity.LOW,
+        passed=passed,
+        severity=Severity.LOW if passed else Severity.MEDIUM,
         evidence=evidence,
         source=ResultSource.GRAPHQL_COP,
     )
@@ -238,7 +251,9 @@ def _print_results(results: list[VulnerabilityResult]) -> None:
 
 def _run_dvga() -> None:
     entries = [
-        e for e in load_benchmark_mapping() if e["tool"] == "graphql_cop" and e["app"] == "dvga"
+        e
+        for e in load_benchmark_mapping()
+        if e["tool"] == "graphql_cop" and e["app"] == "dvga"
     ]
     if not entries:
         logger.info("No 'tool: graphql_cop' benchmark_mapping.yaml entries for 'dvga'")
@@ -274,7 +289,10 @@ def _run_dvga() -> None:
                 difficulty = DIFFICULTY_BY_TEST_NAME[test_name]
                 entry_results.append(
                     _result_for_entry(
-                        test_name, category, reports_by_difficulty[difficulty], difficulty
+                        test_name,
+                        category,
+                        reports_by_difficulty[difficulty],
+                        difficulty,
                     )
                 )
             run.log_results(entry_results)
