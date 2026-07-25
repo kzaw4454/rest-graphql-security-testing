@@ -25,9 +25,8 @@ ANALYSIS_OUTPUT_ROOT = REPO_ROOT / "results" / "analysis"
 GROUND_TRUTH_PATH = REPO_ROOT / "config" / "ground_truth.yaml"
 BENCHMARK_MAPPING_PATH = REPO_ROOT / "config" / "benchmark_mapping.yaml"
 
-# Row-level metrics only ever count assertions that test the module's target
-# vulnerability. A CONTROL row failing means a baseline assumption broke, not
-# that a vulnerability was found, so it is never counted here.
+# Count assertions that test the module's target vulnerability.
+# A control is omitted and not counted as it is baseline check only.
 FINDING_ROLES = ("detection", "adjacent")
 
 
@@ -83,13 +82,9 @@ class VulnerabilityCoverage:
 
 def _latest_rows_by_test_name(category_dir: Path) -> list[dict[str, Any]]:
     """
-    Read every .jsonl file in an owasp_category folder, then for each
-    distinct test_name keep only the rows from that test_name's own latest
-    run_id. A folder can hold output from several test_names logged at
-    different times (e.g. DVGA's api8_2023_security_misconfiguration holds
-    rows from graphql_auth_bypass.py, graphql_injection.py, and
-    graphql_info_disclosure.py, run separately), so picking a single newest
-    file for the whole folder would silently drop older test_names' rows.
+    Keeps only each tests' latest run to prevent multi-counting
+    (old results won't be counted for a statistic).
+    Works with `_target_dir` and `load_latest_results` functions
     """
     records_by_test_name: dict[str, list[dict[str, Any]]] = {}
     latest_run_id_by_test_name: dict[str, str] = {}
@@ -115,6 +110,7 @@ def _latest_rows_by_test_name(category_dir: Path) -> list[dict[str, Any]]:
 
 
 def _target_dir(target: str, architecture: Optional[str]) -> Path:
+    """Designated directory for log output"""
     if architecture is not None:
         return RESULTS_LOG_ROOT / architecture / target
     for architecture_dir in sorted(RESULTS_LOG_ROOT.iterdir()):
@@ -132,7 +128,7 @@ def load_latest_results(
     target: str, architecture: Optional[str] = None
 ) -> list[LoggedResult]:
     """
-    Load each test_name's latest-run rows for every owasp_category folder
+    Load each test's latest run for every owasp category (by folder)
     under results/logs/<architecture>/<target>/.
     """
     target_dir = _target_dir(target, architecture)
@@ -168,11 +164,7 @@ def load_latest_results(
 def load_ground_truth(
     target: str, path: Path = GROUND_TRUTH_PATH
 ) -> list[dict[str, Any]]:
-    """
-    Documented vulnerabilities for a target. `out_of_scope` and
-    `instance_count` default to False/1 for entries predating those fields,
-    rather than requiring a backfill.
-    """
+    """Loads documented list of known vulnerabilities from `config_ground_truth.yaml`."""
     with path.open("r") as f:
         data = yaml.safe_load(f) or {}
     entries = data.get(target, [])
@@ -186,9 +178,8 @@ def load_benchmark_mapping(
     path: Path = BENCHMARK_MAPPING_PATH,
 ) -> list[dict[str, Any]]:
     """
-    Test-case pairings between this framework's own modules and the
-    external benchmarking tools (ZAP, GraphQL Cop), one entry per row of
-    the dissertation's test case plan that has a benchmark counterpart.
+    Loads benchmarking to do a comparison between framework's modules
+    and existing tools (ZAP and GraphQL Cop).
     """
     with path.open("r") as f:
         entries = yaml.safe_load(f) or []
@@ -202,28 +193,7 @@ _TOOL_SOURCE = {
 
 
 def benchmark_comparison(target: str) -> pd.DataFrame:
-    """
-    Joins this framework's own detection results against the corresponding
-    benchmark tool's results for every config/benchmark_mapping.yaml entry
-    scoped to `target`.
-
-    Framework and tool rows are joined on `test_name`: a mapping entry's
-    `framework_test_name` (a single test_name, or a list when the plan's
-    test case spans more than one framework module) names the exact
-    test_name value both this framework's module and the benchmark
-    runner's logged rows share for that test case, distinguished only by
-    `source`. A row with no logged results yet for one side reports that
-    side's `*_detected` as None rather than False, since "not run" and
-    "run and found nothing" are different states for the dissertation's
-    data to distinguish.
-
-    Tool rows tagged `extra={"inconclusive": True}` are excluded from
-    `tool_rows` entirely, so a benchmark runner's own setup failure (e.g.
-    zap_runner.py couldn't build a valid scan URL, or a tool subprocess
-    never actually ran) falls back to the same `tool_detected=None`
-    behaviour as if no row existed at all -- not `False`, which would
-    misrepresent "the tool never ran" as "the tool ran and found nothing".
-    """
+    """Builds side-by-side comparison table between framework and benchmark tools"""
     columns = [
         "id",
         "test_case",
@@ -291,12 +261,7 @@ def benchmark_comparison(target: str) -> pd.DataFrame:
 def compute_row_level_metrics(
     target: str, results: list[LoggedResult]
 ) -> RowLevelMetrics:
-    """
-    TP/FN from DETECTION/ADJACENT rows only: passed=False -> TP (vulnerability
-    confirmed), passed=True -> FN. Benchmark tool rows (source=zap/graphql_cop)
-    are excluded — this framework's own detection rate must not be inflated
-    by a separate tool's results logged alongside it.
-    """
+    """Computes precision/recall/F1 math."""
     finding_rows = [
         r
         for r in results
@@ -332,10 +297,7 @@ def compute_row_level_metrics(
 def compute_vulnerability_coverage(
     target: str, results: list[LoggedResult], ground_truth: list[dict[str, Any]]
 ) -> VulnerabilityCoverage:
-    """
-    "detected":  atleast one of its test_names appears among the loaded rows
-    with assertion_role and passed=False
-    """
+    """Computes % of documented vulnerabitlies that were tested"""
     confirmed_test_names = {
         r.test_name
         for r in results
@@ -392,10 +354,7 @@ def compute_vulnerability_coverage(
 
 
 def severity_distribution(results: list[LoggedResult]) -> dict[str, int]:
-    """
-    Counts by severity across the given rows. Supporting descriptive stats
-    only -- not part of detection rate / precision / recall / F1.
-    """
+    """Counts confirmed finding by severity level."""
     counts: dict[str, int] = {}
     for r in results:
         counts[r.severity] = counts.get(r.severity, 0) + 1
