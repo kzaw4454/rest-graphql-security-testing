@@ -1,26 +1,5 @@
 """
 GraphQL Cop benchmark runner (DVGA).
-
-Drives the dolevf/graphql-cop CLI against DVGA's /graphql endpoint for
-every config/benchmark_mapping.yaml entry tagged `tool: graphql_cop`, and
-logs the outcome as VulnerabilityResult rows (source=GRAPHQL_COP) via the
-same RunLogger every framework module uses. This lets
-comparative_stats.py's benchmark_comparison() join GraphQL Cop's results
-against this framework's own detection results for the dissertation's
-benchmarking section.
-
-graphql-cop has no packaging at all (no setup.py/pyproject.toml) -- it is
-vendored as source under benchmarks/graphql-cop/, with its own isolated
-venv at benchmarks/graphql-cop/venv/ (its pinned requests==2.25.1
-conflicts with this project's own requests requirement). Set up with:
-
-    git clone https://github.com/dolevf/graphql-cop.git benchmarks/graphql-cop
-    python3 -m venv benchmarks/graphql-cop/venv
-    benchmarks/graphql-cop/venv/bin/pip install -r benchmarks/graphql-cop/requirements.txt
-
-See notes/notes_benchmarks/graphql_cop_runner.md for the exact CLI
-invocation and JSON schema, confirmed directly against the tool's actual
-source and a live run.
 """
 
 from __future__ import annotations
@@ -42,12 +21,6 @@ logger = logging.getLogger(__name__)
 
 GRAPHQL_COP_TIMEOUT_SECONDS = 120.0
 
-# DVGA's own vulnerability tests each need a specific difficulty mode to
-# reproduce the finding (see src/vulnerabilities/graphql_info_disclosure.py
-# and graphql_dos.py) -- graphql_cop has no per-check difficulty control of
-# its own, so this runner sets DVGA's difficulty before each CLI invocation
-# and reuses one run's output across every test_name that needs the same
-# mode, rather than re-running the tool per test_name.
 DIFFICULTY_BY_TEST_NAME = {
     "introspection_exposure": "easy",
     "field_suggestion_info_disclosure": "hard",
@@ -55,13 +28,6 @@ DIFFICULTY_BY_TEST_NAME = {
     "batch_query_dos": "easy",
 }
 
-# Exact `title` values graphql-cop's own checks report, confirmed against
-# lib/tests/*.py in the vendored checkout and a live run against DVGA (see
-# notes/notes_benchmarks/graphql_cop_runner.md) -- matched by exact
-# (case-insensitive) equality, not substring containment, since e.g.
-# "Introspection" and "Introspection-based Circular Query" both contain
-# "introspection" and would otherwise be conflated. A value of None means
-# graphql-cop has no corresponding check at all.
 CHECK_NAME_HINTS: dict[str, Optional[tuple[str, ...]]] = {
     "introspection_exposure": ("introspection",),
     "field_suggestion_info_disclosure": ("field suggestions",),
@@ -69,11 +35,6 @@ CHECK_NAME_HINTS: dict[str, Optional[tuple[str, ...]]] = {
     "batch_query_dos": ("array-based query batching",),
 }
 
-# deep_nesting_dos's mapped check tests a genuinely different mechanism
-# than this framework's own test (see module docstring reasoning in
-# notes/notes_benchmarks/graphql_cop_runner.md) -- this caveat is appended
-# to its evidence whenever a match is found, so the dissertation table
-# doesn't read the two as equivalent coverage.
 MECHANISM_CAVEATS: dict[str, str] = {
     "deep_nesting_dos": (
         "CAVEAT: graphql-cop's 'Introspection-based Circular Query' check "
@@ -88,13 +49,6 @@ MECHANISM_CAVEATS: dict[str, str] = {
     ),
 }
 
-# Test names whose mapped graphql-cop check (see CHECK_NAME_HINTS) tests a
-# genuinely different mechanism than this framework's own test for the same
-# row (see MECHANISM_CAVEATS) -- a match from graphql-cop here does not
-# confirm it detected the same vulnerability, so these are never counted as
-# a detection regardless of what graphql-cop's report says. The evidence
-# text still reports graphql-cop's actual result and the mechanism caveat,
-# so the mismatch stays visible rather than silently forcing a clean pass.
 MECHANISM_MISMATCH_TEST_NAMES = {"deep_nesting_dos"}
 
 
@@ -103,7 +57,7 @@ def _as_list(value: Any) -> list[Any]:
 
 
 def _load_graphql_cop_config(config_path: str = "config/dvga.yaml") -> dict[str, Any]:
-    """Reads the `graphql_cop:` block from config/dvga.yaml (script_path, python_path)."""
+    """Reads paths (file, python interpreter) of `graphql_cop:` from config/dvga.yaml."""
     with open(config_path, "r") as f:
         data = yaml.safe_load(f)
     graphql_cop_config = data.get("graphql_cop")
@@ -120,14 +74,8 @@ def _run_graphql_cop(
     python_path: str, script_path: str, endpoint: str
 ) -> Optional[list[dict[str, Any]]]:
     """
-    Runs graphql-cop against `endpoint` via its own isolated venv's python
-    interpreter and returns its parsed JSON report, or None if the
-    invocation itself failed (subprocess error, timeout, non-JSON output).
-
-    `-o json` prints a JSON array directly to stdout (confirmed from
-    graphql-cop.py's source: `print(dumps(json_output))`) -- it is not a
-    file path despite the option's help text reading just "json"; there is
-    no `-o <file>` form.
+    Runs graphql-cop against DVGA and parses its JSON output.
+    Crashes or times out -> returns `None` (tools failed signal, not too fount nothing).
     """
     try:
         result = subprocess.run(
@@ -144,11 +92,13 @@ def _run_graphql_cop(
 
 
 def _matches(check: dict[str, Any], hints: tuple[str, ...]) -> bool:
+    """Checks if graphql-cop check's title matches title of a given test."""
     title = str(check.get("title", "")).strip().lower()
     return title in hints
 
 
 def _check_is_vulnerable(check: dict[str, Any]) -> bool:
+    """Checkes if graphql-cop's result being flagged as vulnerable."""
     return bool(check.get("result", False))
 
 
@@ -159,6 +109,10 @@ def _result_for_entry(
     difficulty: str,
 ) -> VulnerabilityResult:
     if checks is None:
+        """
+        Checks if graphql-cop reports the same vulnerability as
+        what the framework tests, and produces the results.
+        """
         return VulnerabilityResult(
             test_name=test_name,
             owasp_category=owasp_category,
