@@ -1,13 +1,5 @@
 """
 OWASP ZAP benchmark runner for the REST targets.
-
-Drives a ZAP daemon (see docker/docker-compose.zap.yml) through the same
-spider -> active scan -> alerts sequence for every config/benchmark_mapping.yaml
-entry tagged `tool: zap`, and logs the outcome as VulnerabilityResult rows
-(source=ZAP) via the same RunLogger every framework module uses. This lets
-comparative_stats.py's benchmark_comparison() join ZAP's results against
-this framework's own detection results for the dissertation's benchmarking
-section.
 """
 
 from __future__ import annotations
@@ -33,12 +25,6 @@ from src.vulnerabilities.base import (
 
 logger = logging.getLogger(__name__)
 
-# ZAP's daemon runs inside its own container on the target's docker network
-# (docker/docker-compose.zap.yml), so it must address the target by its
-# container hostname and the port that container listens on *internally* --
-# not the host-published base_url each target's own config/<target>.yaml
-# uses for this framework's own REST clients, which run on the host. See
-# notes/notes_benchmarks/zap_runner.md.
 INTERNAL_TARGET_BASE_URL = {
     "vampi": "http://vampi:5000",
     "crapi": "http://crapi-web:80",
@@ -50,11 +36,6 @@ SPIDER_MAX_WAIT_SECONDS = 120.0
 ASCAN_POLL_INTERVAL_SECONDS = 2.0
 ASCAN_MAX_WAIT_SECONDS = 180.0
 
-# ZAP's own alert risk scale doesn't map onto this framework's Severity
-# enum one-to-one; this is an approximate correspondence for reporting
-# purposes only, not a claim the two scales are equivalent. Ordered
-# highest to lowest risk, so the first match when scanning alerts is the
-# most severe one present.
 RISK_ORDER = ["High", "Medium", "Low", "Informational"]
 RISK_TO_SEVERITY = {
     "High": Severity.CRITICAL,
@@ -63,12 +44,6 @@ RISK_TO_SEVERITY = {
     "Informational": Severity.LOW,
 }
 
-# org.parosproxy.paros.core.scanner.ScannerParam's TARGET_* bitmask
-# constants, confirmed via `javap -p -constants` against the actual class
-# file inside the running ghcr.io/zaproxy/zaproxy:stable (2.17.0) image --
-# not documented anywhere in the zapv2 Python client or its API views.
-# TARGET_INJECTABLE_DEFAULT (35 = QUERYSTRING|POSTDATA|PLAINBODY) is ZAP's
-# own out-of-the-box default and notably excludes TARGET_URLPATH (16).
 TARGET_QUERYSTRING = 1
 TARGET_POSTDATA = 2
 TARGET_COOKIE = 4
@@ -77,57 +52,19 @@ TARGET_URLPATH = 16
 TARGET_PLAINBODY = 32
 TARGET_INJECTABLE_DEFAULT = 35
 
-# VAmPI's sqli_user_lookup target (GET /users/v1/{username}) is injectable
-# only via the URL path segment itself -- with ZAP's default
-# target_params_injectable, its active scan never attempts injection there
-# at all, which would make a "clean" (no alert) result mean "ZAP never
-# tried" rather than "ZAP tried and found nothing". _connect() enables
-# TARGET_URLPATH in addition to ZAP's own defaults; any test_name in this
-# set gets an explicit evidence caveat if that setting didn't confirm.
 PATH_SEGMENT_DEPENDENT_TEST_NAMES = {"sqli_user_lookup"}
 
-# Substrings of ZAP's own active-scan alert names (the `alert` field of
-# zap.core.alerts()) that indicate a finding relevant to each test case --
-# confirmed via zap.ascan.scanners() against the running daemon, not
-# guessed. A value of None means this vulnerability class has no
-# corresponding ZAP alert type at all: passed is always True regardless of
-# what unrelated alerts fired, since ZAP fundamentally cannot test this,
-# not because it tried and found nothing.
 ALERT_NAME_HINTS: dict[str, Optional[tuple[str, ...]]] = {
-    # VAmPI: GET /users/v1/{username} builds raw SQL via f-string
-    # interpolation of the username path segment. ZAP's "SQL Injection"
-    # rule (40018) and its per-DBMS time-based variants (40019-40022,
-    # 40027) all share this substring in their alert name.
     "sqli_user_lookup": ("sql injection",),
-    # crAPI: POST /workshop/api/shop/apply_coupon's coupon_code JSON field
-    # is a genuine SQL injection point (see src/vulnerabilities/injection.py).
-    # Unlike sqli_user_lookup's path segment, this is a POST body field --
-    # covered by ZAP's default target_params_injectable (POSTDATA|PLAINBODY).
     "sqli_apply_coupon": ("sql injection",),
-    # crAPI: POST .../coupon/validate-coupon is a NoSQL (MongoDB operator)
-    # injection. zap.ascan.scanners() confirms this ZAP build has no
-    # NoSQL/MongoDB-specific active scan rule at all.
     "nosqli_coupon_validate": None,
-    # JWT forgery: ZAP has no active-scan rule that forges or verifies
-    # JWT signatures.
     "jwt_weak_signing_bypass": None,
     "jwt_signature_verification_bypass": None,
-    # Excessive Data Exposure (plaintext password / other users' data
-    # inside an otherwise-200 JSON response body): ZAP has no generic
-    # sensitive-data-in-response-body active scan rule.
     "vampi_debug_endpoint_exposure": None,
     "excessive_user_data_exposure": None,
-    # BOLA/IDOR (one valid token reading another user's object): ZAP has
-    # no capability to compare two tokens' authorized object sets against
-    # each other.
     "bola_basket_access": None,
 }
 
-# Placeholder JSON bodies for benchmark_mapping.yaml entries whose target_spec
-# declares method: POST (currently crAPI's two coupon endpoints, rest_04).
-# These only need to be syntactically valid and harmless -- once the message
-# shape is on record in ZAP via send_request(), ZAP's own active scan
-# supplies its own payload values for the coupon_code field.
 POST_BODY_BY_TEST_NAME: dict[str, dict[str, Any]] = {
     "nosqli_coupon_validate": {"coupon_code": "TEST10"},
     "sqli_apply_coupon": {"coupon_code": "TEST10", "amount": 1},
@@ -139,7 +76,7 @@ def _as_list(value: Any) -> list[Any]:
 
 
 def _load_zap_connection(app: str) -> dict[str, Any]:
-    """Reads the `zap:` block from config/<app>.yaml (host, port, api_key)."""
+    """Reads ZAP's host, port, and API key from config/<app>.yaml"""
     with open(f"config/{app}.yaml", "r") as f:
         data = yaml.safe_load(f)
     zap_config = data.get("zap")
@@ -154,12 +91,8 @@ def _load_zap_connection(app: str) -> dict[str, Any]:
 
 def _connect(zap_config: dict[str, Any]) -> tuple[ZAPv2, bool]:
     """
-    Connects to the ZAP daemon and enables URL-path-segment injection on
-    top of ZAP's own defaults (TARGET_INJECTABLE_DEFAULT excludes
-    TARGET_URLPATH -- see the module-level constants), since
-    sqli_user_lookup's injection point is a path segment. Returns
-    (client, path_injection_confirmed) -- the second value is read back
-    from ZAP itself after setting it, not assumed to have taken effect.
+    Connects to the ZAP daemon and enables URL-path-segment injection
+    (`sqli_user_lookup` test case is injectable only through the URL path).
     """
     proxy = f"http://{zap_config['host']}:{zap_config['port']}"
     zap = ZAPv2(apikey=zap_config["api_key"], proxies={"http": proxy, "https": proxy})
@@ -186,16 +119,8 @@ def _connect(zap_config: dict[str, Any]) -> tuple[ZAPv2, bool]:
 
 def _resolve_vampi_book_title(host_base_url: Optional[str]) -> Optional[str]:
     """
-    VAmPI's `/books/v1/{book_title}` (row 5, jwt_weak_signing_bypass) needs
-    a real book title for ZAP's active scan to probe a genuine resource
-    rather than a 404. This listing endpoint requires no auth, matching
-    src/vulnerabilities/authentication.py's own discovery step.
-
-    This request runs directly from this script on the host, not proxied
-    through ZAP's daemon, so it must hit VAmPI's host-published base_url --
-    the internal Docker Compose service hostname (INTERNAL_TARGET_BASE_URL)
-    is only resolvable from inside the target's own Docker network, where
-    ZAP's daemon lives, not from a plain requests.get() made from the host.
+    Fetches a book title as a `/books/v1/{book_title}` test needs
+    a real book title for ZAP's active scan to probe a resource.
     """
     if host_base_url is None:
         return None
@@ -217,26 +142,13 @@ def _resolve_vampi_book_title(host_base_url: Optional[str]) -> Optional[str]:
 def _resolve_endpoint_placeholders(
     endpoint: str, internal_base_url: str, host_base_url: Optional[str]
 ) -> Optional[str]:
-    """
-    Resolves every `{...}` path template in `endpoint` to a concrete value.
-    ZAP's own API rejects a literal, unresolved `{...}` segment as an
-    illegal parameter rather than treating it as an ordinary path
-    character -- access_url/spider.scan/ascan.scan all return the string
-    'illegal_parameter' instead of a real id in that case, which then
-    breaks status polling. Returns None if a placeholder could not be
-    resolved (caller should log a setup-failure result and skip the scan).
-    """
+    """Resolves every `{...}` path template in `endpoint` to a concrete value."""
     if "{book_title}" in endpoint:
         book_title = _resolve_vampi_book_title(host_base_url)
         if book_title is None:
             return None
         endpoint = endpoint.format(book_title=book_title)
     if "{id}" in endpoint:
-        # Juice Shop's /rest/basket/{id}: this route requires an
-        # authenticated session ZAP does not have (requires_auth in
-        # config/benchmark_mapping.yaml), so the concrete id scanned
-        # doesn't change the outcome -- any small integer keeps the URL
-        # well-formed for ZAP's API to accept the scan request at all.
         endpoint = endpoint.format(id=1)
     return endpoint
 
@@ -248,18 +160,7 @@ def _poll_until_complete(
     max_wait: float,
     stage_name: str,
 ) -> tuple[str, Optional[str]]:
-    """
-    Polls `status_fn(scan_id)` until it reports 100, times out, or reports
-    a non-numeric status. Returns (outcome, caveat):
-
-    - ("ok", None): reached 100% cleanly.
-    - ("timeout", <caveat>): didn't reach 100% in time, but whatever
-      alerts exist so far are still real, partial data -- not a rejection.
-    - ("rejected", <caveat>): `scan_id` isn't a real scan at all (e.g.
-      status() returns 'does_not_exist' following a rejected scan request
-      such as 'illegal_parameter' for a malformed target URL) -- ZAP never
-      actually executed this stage, so no alerts were ever collected.
-    """
+    """Repeatedly checks if the scan has been done using a timeout."""
     deadline = time.monotonic() + max_wait
     while True:
         status = status_fn(scan_id)
@@ -282,13 +183,7 @@ def _poll_until_complete(
 
 
 def _build_raw_post_request(url: str, json_body: dict[str, Any]) -> str:
-    """
-    Builds a raw HTTP request string in the request-line + headers + CRLF +
-    body shape ZAP's core.send_request() API expects (an absolute-URI
-    request line, per ZAP's own documented usage of this action, removes
-    any ambiguity about which host ZAP should connect to when relaying the
-    message through its own proxy plumbing).
-    """
+    """Builds a raw HTTP request for POST-based tests."""
     body = json.dumps(json_body)
     body_bytes = body.encode("utf-8")
     return (
@@ -306,21 +201,7 @@ def _scan_target(
     method: str = "GET",
     json_body: Optional[dict[str, Any]] = None,
 ) -> tuple[list[dict[str, Any]], list[str], bool]:
-    """
-    Runs spider then active scan against `url`, returning
-    (alerts, caveats, rejected). `rejected=True` means ZAP refused the scan
-    request outright (e.g. a malformed URL) -- this run's own value is in
-    recording what ZAP could/couldn't confirm, not in guaranteeing a clean
-    scan, so a timeout still returns whatever partial alerts exist while a
-    rejection returns none at all and flags the result as inconclusive to
-    the caller.
-
-    For method="POST", the seed request is submitted via ZAP's
-    core.send_request() (a raw request ZAP records into its history with
-    the real method/content-type/body) instead of the GET-only
-    core.access_url() -- otherwise ZAP's active scan never sees a message
-    shaped like the real POST request and has no JSON field to mutate.
-    """
+    """Orchestrates spider -> active scan -> alert collection for one URL"""
     caveats: list[str] = []
     if method == "POST":
         zap.core.send_request(_build_raw_post_request(url, json_body or {}))
@@ -358,6 +239,7 @@ def _scan_target(
 
 
 def _path_injection_caveat(test_name: str, path_injection_confirmed: bool) -> str:
+    """Adds a warning if path scanning is not confirmed enabled."""
     if test_name not in PATH_SEGMENT_DEPENDENT_TEST_NAMES:
         return ""
     if path_injection_confirmed:
@@ -387,6 +269,10 @@ def _result_from_scan(
     path_injection_confirmed: bool,
     method: str = "GET",
 ) -> VulnerabilityResult:
+    """
+    Takes ZAP's raw alerts and converts them into standard 
+    VulnerabilityResult object (pass/fail, severity, evidence text).
+    """
     request_summary = (
         f"ZAP spider + active scan: {method} {url}"
         if method == "POST"
@@ -495,6 +381,7 @@ def _run_entry(
     path_injection_confirmed: bool,
     host_base_url: Optional[str],
 ) -> list[VulnerabilityResult]:
+    """Runs all test cases for a benchmark mapping entry."""
     app = entry["app"]
     internal_base_url = INTERNAL_TARGET_BASE_URL[app]
 
