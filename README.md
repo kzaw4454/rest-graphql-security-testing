@@ -98,10 +98,10 @@ benchmarks/graphql-cop/venv/bin/pip install -r benchmarks/graphql-cop/requiremen
 ### Spin up a target
 
 ```bash
-docker-compose -f docker/docker-compose.vampi.yml up -d
-docker-compose -f docker/docker-compose.crapi.yml up -d
-docker-compose -f docker/docker-compose.juiceshop.yml up -d
-docker-compose -f docker/docker-compose.dvga.yml up -d
+docker compose -f docker/docker-compose.vampi.yml up -d
+docker compose -f docker/docker-compose.crapi.yml up -d
+docker compose -f docker/docker-compose.juiceshop.yml up -d
+docker compose -f docker/docker-compose.dvga.yml up -d
 ```
 
 ## Usage
