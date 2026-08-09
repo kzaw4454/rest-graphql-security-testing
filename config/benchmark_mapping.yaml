@@ -1,0 +1,235 @@
+# Benchmark pairings between this framework's own vulnerability test modules
+# and the external tools (OWASP ZAP, GraphQL Cop) used for comparison, per
+# the test case plan in notes/Prioritized_Test_Case_Plan.md.
+#
+# Schema (one entry per benchmarked test case):
+#   id                 - stable identifier for this comparison row
+#   architecture       - "rest" or "graphql"
+#   plan_row           - row number in Prioritized_Test_Case_Plan.md
+#   test_case          - human-readable test case name from the plan
+#   app                - target name (vampi, crapi, juiceshop, dvga)
+#   framework_test_name - test_name value(s) this framework's own module logs
+#     for this test case (a list when the plan row spans more than one
+#     framework module/test_name). The benchmark runner logs its own tool
+#     results under this same test_name, distinguished only by `source`, so
+#     comparative_stats.py's benchmark_comparison() can join the two by
+#     test_name.
+#   tool                - "zap" or "graphql_cop"
+#   classification       - "clean" (tool reaches and meaningfully tests the
+#     case), "partial" (tool runs but has a caveat -- e.g. no authenticated
+#     session, no matching built-in check), or "excluded" (not attempted;
+#     unused in this file -- the excluded rows are BOLA across all REST
+#     targets, both targets' rate-limiting checks, DVGA auth bypass, and
+#     DVGA injection, since neither ZAP nor GraphQL Cop has a corresponding
+#     detection capability for any of them)
+#   target               - endpoint/scan parameters the benchmark runner
+#     passes to the tool. A list when the test case spans more than one
+#     endpoint; list order matches framework_test_name's order where both
+#     are lists.
+#   owasp_category        - owasp_category value(s) the benchmark runner tags
+#     its logged VulnerabilityResult rows with, taken verbatim from the
+#     corresponding framework module(s) (never invented here) so RunLogger
+#     files tool results under the same category folder as their framework
+#     counterpart. Same list-or-string shape as framework_test_name -- a
+#     list when framework_test_name is a list, aligned the same way target's
+#     list is (row 8 spans two different categories, one per test_name).
+#   notes                - benchmark-specific caveat for the dissertation
+
+- id: rest_03_sqli_vampi
+  architecture: rest
+  plan_row: 3
+  test_case: "SQL Injection"
+  app: vampi
+  framework_test_name: sqli_user_lookup
+  tool: zap
+  classification: clean
+  target:
+    base_url: "http://127.0.0.1:5001"
+    # {username} resolved to a real seeded username so ZAP has a concrete
+    # URL to spider and fuzz with its own SQLi active-scan rule.
+    endpoint: "/users/v1/name1"
+    method: GET
+    scan_type: active
+  owasp_category: "API8:2023 Security Misconfiguration"
+  notes: "No auth required; ZAP's active scan reaches this endpoint directly."
+
+- id: rest_04_nosqli_sqli_crapi
+  architecture: rest
+  plan_row: 4
+  test_case: "NoSQL/SQL Injection"
+  app: crapi
+  framework_test_name:
+    - nosqli_coupon_validate
+    - sqli_apply_coupon
+  tool: zap
+  classification: partial
+  target:
+    - base_url: "http://127.0.0.1:8888"
+      endpoint: "/community/api/v2/coupon/validate-coupon"
+      method: POST
+      scan_type: active
+      requires_auth: true
+    - base_url: "http://127.0.0.1:8888"
+      endpoint: "/workshop/api/shop/apply_coupon"
+      method: POST
+      scan_type: active
+      requires_auth: true
+  owasp_category:
+    - "API8:2023 Security Misconfiguration"
+    - "API8:2023 Security Misconfiguration"
+  notes: >
+    Both endpoints require a registered crAPI session, which ZAP's active
+    scan does not establish on its own; caveat as partial pending an
+    authenticated ZAP context (e.g. an HTTP Sender script attaching a
+    bearer token).
+
+- id: rest_05_jwt_weak_signing_vampi
+  architecture: rest
+  plan_row: 5
+  test_case: "JWT weak signing bypass"
+  app: vampi
+  framework_test_name: jwt_weak_signing_bypass
+  tool: zap
+  classification: partial
+  target:
+    base_url: "http://127.0.0.1:5001"
+    endpoint: "/books/v1/{book_title}"
+    method: GET
+    scan_type: active
+  owasp_category: "API2:2023 Broken Authentication"
+  notes: >
+    ZAP has no built-in rule that forges or key-guesses JWT signatures;
+    its active scan can reach the endpoint but cannot itself reproduce the
+    weak-secret bypass, so this is caveated as partial.
+
+- id: rest_06_broken_auth_crapi
+  architecture: rest
+  plan_row: 6
+  test_case: "Broken Authentication"
+  app: crapi
+  framework_test_name: jwt_signature_verification_bypass
+  tool: zap
+  classification: partial
+  target:
+    - base_url: "http://127.0.0.1:8888"
+      endpoint: "/identity/api/v2/user/dashboard"
+      method: GET
+      scan_type: active
+      requires_auth: true
+    - base_url: "http://127.0.0.1:8888"
+      endpoint: "/identity/api/v2/vehicle/vehicles"
+      method: GET
+      scan_type: active
+      requires_auth: true
+  owasp_category: "API2:2023 Broken Authentication"
+  notes: >
+    Same JWT-forging limitation as row 5 -- ZAP does not attempt signature
+    bypass or key-reuse attacks on its own; caveat as partial.
+
+- id: rest_07_data_exposure_vampi
+  architecture: rest
+  plan_row: 7
+  test_case: "Excessive Data Exposure (debug endpoint)"
+  app: vampi
+  framework_test_name: vampi_debug_endpoint_exposure
+  tool: zap
+  classification: partial
+  target:
+    base_url: "http://127.0.0.1:5001"
+    endpoint: "/users/v1/_debug"
+    method: GET
+    scan_type: active
+  owasp_category: "API3:2023 Excessive Data Exposure"
+  notes: >
+    ZAP's active scan reaches this unauthenticated endpoint, but has no
+    built-in rule that recognises plaintext-password disclosure in a JSON
+    response body as a finding on its own -- caveat as partial.
+
+- id: rest_08_data_exposure_idor_juiceshop
+  architecture: rest
+  plan_row: 8
+  test_case: "Data Exposure/IDOR"
+  app: juiceshop
+  framework_test_name:
+    - bola_basket_access
+    - excessive_user_data_exposure
+  tool: zap
+  classification: partial
+  target:
+    - base_url: "http://127.0.0.1:3000"
+      endpoint: "/rest/basket/{id}"
+      method: GET
+      scan_type: active
+      requires_auth: true
+    - base_url: "http://127.0.0.1:3000"
+      endpoint: "/rest/user/authentication-details"
+      method: GET
+      scan_type: active
+      requires_auth: true
+  owasp_category:
+    - "API1:2023 Broken Object Level Authorization"
+    - "API3:2023 Excessive Data Exposure"
+  notes: >
+    Both endpoints require an authenticated Juice Shop session, which
+    ZAP's active scan does not establish on its own; caveat as partial.
+
+- id: graphql_03_introspection_dvga
+  architecture: graphql
+  plan_row: 3
+  test_case: "Introspection exposure"
+  app: dvga
+  framework_test_name: introspection_exposure
+  tool: graphql_cop
+  classification: clean
+  target:
+    endpoint: "http://127.0.0.1:5013/graphql"
+    scan_mode: cli
+  owasp_category: "API8:2023 Security Misconfiguration"
+  notes: "GraphQL Cop's introspection check directly matches this test case."
+
+- id: graphql_04_field_suggestion_dvga
+  architecture: graphql
+  plan_row: 4
+  test_case: "Field suggestion/info disclosure"
+  app: dvga
+  framework_test_name: field_suggestion_info_disclosure
+  tool: graphql_cop
+  classification: clean
+  target:
+    endpoint: "http://127.0.0.1:5013/graphql"
+    scan_mode: cli
+  owasp_category: "API8:2023 Security Misconfiguration"
+  notes: "GraphQL Cop's field-suggestion check directly matches this test case."
+
+- id: graphql_05_dos_deep_nesting_dvga
+  architecture: graphql
+  plan_row: 5
+  test_case: "DoS - deep nesting"
+  app: dvga
+  framework_test_name: deep_nesting_dos
+  tool: graphql_cop
+  classification: partial
+  target:
+    endpoint: "http://127.0.0.1:5013/graphql"
+    scan_mode: cli
+  owasp_category: "API4:2023 Unrestricted Resource Consumption"
+  notes: >
+    GraphQL Cop has no query-depth check; it cannot reproduce this finding
+    on its own, so this is attempted for completeness and caveated as
+    partial.
+
+- id: graphql_06_dos_batch_query_dvga
+  architecture: graphql
+  plan_row: 6
+  test_case: "DoS - batch query"
+  app: dvga
+  framework_test_name: batch_query_dos
+  tool: graphql_cop
+  classification: partial
+  target:
+    endpoint: "http://127.0.0.1:5013/graphql"
+    scan_mode: cli
+  owasp_category: "API4:2023 Unrestricted Resource Consumption"
+  notes: >
+    GraphQL Cop's batch-query check only confirms batching is accepted at
+    all, not whether an oversized batch is unchecked -- caveat as partial.

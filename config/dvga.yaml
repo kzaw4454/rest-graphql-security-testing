@@ -1,0 +1,166 @@
+# Target configuration for DVGA (GraphQL target)
+
+target:
+  name: dvga
+  base_url: "http://127.0.0.1:5013"
+  endpoint_path: "/graphql"
+  timeout_seconds: 10
+
+# Test identity seeded into DVGA's own database.
+# Not synthetic/randomized like the REST targets' generated identities —
+# DVGA ships this account by default and has no register/signup mutation.
+test_users:
+  operator:
+    username: "operator"
+    password: "password123"
+
+auth:
+  token_header: "Authorization"
+  token_prefix: "Bearer"
+
+# GraphQL documents used by the DVGA client and vulnerability tests.
+# Kept here rather than inline in source so query/mutation shapes stay
+# config-driven, matching the REST clients' endpoint-path convention.
+#
+# login/me are sent as anonymous operations (no operation name) rather
+# than named ones. DVGA's OpNameProtectionMiddleware only allows a fixed
+# set of operation names once difficulty is hard ('CreatePaste',
+# 'CreateUser', 'EditPaste', 'getPastes', 'UploadPaste', 'ImportPaste');
+# an unrecognized name is rejected outright, and 'Login'/'Me' aren't on
+# that list. Anonymous operations are exempt from the check entirely, so
+# auth setup keeps working regardless of whatever difficulty mode a
+# previous test left the (shared, DB-persisted) server in.
+operations:
+  login: |
+    mutation($username: String!, $password: String!) {
+      login(username: $username, password: $password) {
+        accessToken
+        refreshToken
+      }
+    }
+  me: |
+    query($token: String!) {
+      me(token: $token) {
+        id
+        username
+        password
+      }
+    }
+  create_paste: |
+    mutation($title: String!, $content: String!, $public: Boolean!, $burn: Boolean!) {
+      createPaste(title: $title, content: $content, public: $public, burn: $burn) {
+        paste {
+          id
+          title
+          public
+        }
+      }
+    }
+  pastes: |
+    query($public: Boolean, $filter: String, $limit: Int) {
+      pastes(public: $public, filter: $filter, limit: $limit) {
+        id
+        title
+        public
+      }
+    }
+  system_debug: |
+    query($arg: String) {
+      systemDebug(arg: $arg)
+    }
+
+# Parameters for the Authorization Bypass test cases (see
+# src/vulnerabilities/graphql_auth_bypass.py).
+scan:
+  # GraphQL JWT Token Forge
+  jwt_forge:
+    forged_identity: "admin"
+
+  # DVGA's runtime difficulty is a DB-persisted flag, switched via this
+  # HTTP route rather than a startup env var. Defaults to easy on a
+  # fresh container.
+  difficulty_endpoint: "/difficulty/{level}"
+
+  # GraphQL Query Deny List Bypass
+  deny_list_bypass:
+    denied_query: "{ systemHealth }"
+    bypass_query: |
+      query getPastes {
+        systemHealth
+      }
+    bypass_operation_name: "getPastes"
+
+  # GraphQL Interface Protection Bypass
+  interface_protection:
+    graphiql_path: "/graphiql"
+    cookie_name: "env"
+    disabled_value: "graphiql:disable"
+    enabled_value: "graphiql:enable"
+
+  # GraphQL Injection: pastes(filter) SQL injection + systemDebug(arg) OS
+  # command injection. See src/vulnerabilities/graphql_injection.py.
+  pastes_filter_injection:
+    # {canary} is substituted with a per-run random token at test time, so
+    # the tautology payload never matches a title/content literally and any
+    # match is attributable only to the injection. The leading "'" closes
+    # the string literal DVGA's `'%s'` template opens around the filter
+    # value, letting `OR '1'='1'` run as raw SQL rather than as more
+    # literal text inside that same string.
+    tautology_payload_template: "{canary}' OR '1'='1"
+
+  system_debug_injection:
+    # {canary} is substituted with a per-run random token at test time.
+    command_payload_template: "; echo {canary}"
+
+  # GraphQL Introspection Exposure. See
+  # src/vulnerabilities/graphql_info_disclosure.py.
+  introspection_exposure:
+    probe_query: |
+      { __schema { queryType { name } } }
+
+  # GraphQL Field Suggestion / Information Disclosure. See
+  # src/vulnerabilities/graphql_info_disclosure.py.
+  field_suggestion_disclosure:
+    # Not `{ systemHealth }` deliberately — that exact string is on
+    # helpers.on_denylist()'s deny list (see deny_list_bypass above), which
+    # would reject it in hard mode for a reason unrelated to this test.
+    valid_field_query: "{ systemDebug }"
+    # Deliberate one-character typo of a real field name.
+    misspelled_field_query: "{ systemHealtx }"
+    expected_suggested_field: "systemHealth"
+
+  # GraphQL DoS - Deep Nesting. See src/vulnerabilities/graphql_dos.py.
+  # Both queries walk PasteObject.owner -> OwnerObject.pastes, a cyclic
+  # relation the schema exposes with no depth limit of its own. DVGA's own
+  # depth check (config.py's MAX_DEPTH=8) counts literal '{' tokens in the
+  # raw query text rather than real AST depth. OwnerObject.pastes is an
+  # unfiltered relationship (every paste for that owner, public or not),
+  # so response size grows by a factor of the total paste count at every
+  # additional "pastes" occurrence in the query - kept to the minimum
+  # nesting that exceeds MAX_DEPTH (5 occurrences, 10 tokens) rather than
+  # a deeper one, so this stays a multi-second demonstration rather than a
+  # multi-minute one as the container's paste count grows across runs.
+  deep_nesting_dos:
+    # 4 '{' tokens - under MAX_DEPTH, expected to be allowed in hard mode.
+    shallow_query: |
+      { pastes(public: true) { owner { pastes { title } } } }
+    # 10 '{' tokens - exceeds MAX_DEPTH, expected to be rejected in hard mode.
+    deep_query: |
+      { pastes { owner { pastes { owner { pastes { owner { pastes { owner { pastes { title } } } } } } } } } }
+
+  # GraphQL DoS - Batch Query. See src/vulnerabilities/graphql_dos.py.
+  batch_query_dos:
+    probe_query: "{ systemHealth }"
+    control_batch_size: 2
+    oversized_batch_size: 30
+
+# GraphQL Cop benchmark tool connection (see benchmarks/graphql_cop_runner.py).
+# graphql-cop is vendored as source under benchmarks/graphql-cop/ (not
+# pip-installable -- see notes/notes_benchmarks/graphql_cop_runner.md) with
+# its own isolated venv, since its pinned dependency versions (requests==2.25.1)
+# conflict with this project's own requests requirement (zapv2/docker need
+# >=2.31.0). python_path must point at that isolated venv's interpreter, not
+# the project's own venv/ambient python3.
+graphql_cop:
+  script_path: "benchmarks/graphql-cop/graphql-cop.py"
+  python_path: "benchmarks/graphql-cop/venv/bin/python3"

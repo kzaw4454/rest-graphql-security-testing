@@ -1,0 +1,108 @@
+# Target configuration for crAPI (REST target, multi-service)
+# See docker/docker-compose.crapi.yml for the container stack.
+
+target:
+  name: crapi
+  # crapi-web is the single gateway with a published port in
+  # docker/docker-compose.crapi.yml.
+  base_url: "http://127.0.0.1:8888"
+  timeout_seconds: 10
+  # MailHog captures the welcome email crAPI sends on signup, which
+  # contains the VIN/pincode needed to register a vehicle to an account.
+  mailhog_base_url: "http://127.0.0.1:8025"
+
+  # Endpoints for auth flows and the injection targets. Path prefixes
+  # (/identity, /community, /workshop) route through crapi-web's nginx.
+  endpoints:
+    signup: "/identity/api/auth/signup"
+    login: "/identity/api/auth/login"
+    # Client JSON is unmarshalled directly into a MongoDB filter (bson.M)
+    # with no shape validation, so Mongo operators (e.g. {"$ne": 1}) are
+    # honoured as query logic instead of literal values.
+    validate_coupon: "/community/api/v2/coupon/validate-coupon"
+    # coupon_code is string-concatenated into a raw SQL query with no
+    # parameterisation, allowing stacked queries and boolean tautologies.
+    apply_coupon: "/workshop/api/shop/apply_coupon"
+    # No object-level ownership check: any authenticated user's token can
+    # read any vehicle's GPS location by vehicle id.
+    add_vehicle: "/identity/api/v2/vehicle/add_vehicle"
+    vehicles: "/identity/api/v2/vehicle/vehicles"
+    vehicle_location: "/identity/api/v2/vehicle/{vehicle_id}/location"
+    # Dashboard trusts the JWT `sub` claim without verifying the token's
+    # signature at all.
+    dashboard: "/identity/api/v2/user/dashboard"
+    # No object-level ownership check and no authentication requirement at
+    # all: any request, authenticated or not, can read any order by id.
+    create_order: "/workshop/api/shop/orders"
+    order_detail: "/workshop/api/shop/orders/{order_id}"
+    orders_all: "/workshop/api/shop/orders/all"
+
+# Test identities
+# Synthetic/fictional per Data Protection Act 2018 compliance.
+# crAPI requires name/email/password/number for signup (no username field,
+# unlike VAmPI) and logs in by email.
+test_users:
+  attacker:
+    name: "Attacker One"
+    email: "attacker.crapi.test@test.local"
+    password: "Password123!"
+    number: "9876543210"
+  victim:
+    name: "Victim One"
+    email: "victim.crapi.test@test.local"
+    password: "Password123!"
+    number: "9876543211"
+
+auth:
+  token_header: "Authorization"
+  token_prefix: "Bearer"
+
+# Scan scope / test data lives in config, not hardcoded in source.
+scan:
+  # Mongo operator payloads for the coupon_code field of validate-coupon.
+  # {"$ne": 1} is the primary payload; the others are alternative operators
+  # for the same bypass.
+  nosql_coupon_payloads:
+    - {"$ne": 1}
+    - {"$gt": ""}
+    - {"$nin": [1]}
+
+  # String payloads for the coupon_code field of apply_coupon.
+  sqli_coupon_payloads:
+    - "0'; select version() --+"
+    - "0' or '0' = '0"
+
+  # Product bought via create_order to set up the BOLA order-access test.
+  shop_product_id: 1
+
+  # crapi-identity's RSA signing key, read from the running container's
+  # /app/default_jwks.json (JWT_SECRET env var is set but unused for token
+  # signing; RS256 is used instead). This is the key crapi-identity falls
+  # back to whenever docker/keys/ is left empty, per docker-compose.crapi.yml
+  # — it ships baked into the crapi/crapi-identity image itself, so it is
+  # identical across every deployment that hasn't supplied its own JWKS.
+  jwt_default_jwks:
+    kty: "RSA"
+    kid: "MKMZkDenUfuDF2byYowDj7tW5Ox6XG4Y1THTEGScRg8"
+    alg: "RS256"
+    use: "sig"
+    n: "sZKrGYja9S7BkO-waOcupoGY6BQjixJkg1Uitt278NbiCSnBRw5_cmfuWFFFPgRxabBZBJwJAujnQrlgTLXnRRItM9SRO884cEXn-s4Uc8qwk6pev63qb8no6aCVY0dFpthEGtOP-3KIJ2kx2i5HNzm8d7fG3ZswZrttDVbSSTy8UjPTOr4xVw1Yyh_GzGK9i_RYBWHftDsVfKrHcgGn1F_T6W0cgcnh4KFmbyOQ7dUy8Uc6Gu8JHeHJVt2vGcn50EDtUy2YN-UnZPjCSC7vYOfd5teUR_Bf4jg8GN6UnLbr_Et8HUnz9RFBLkPIf0NiY6iRjp9ooSDkml2OGql3ww"
+    e: "AQAB"
+    d: "XJu0Vh3Uq5gV5UPMCfm_j6D5INgX7VjLSN8mup4LfUBkJAk9vpQmDYF8gVzpMr3YdBk_Y7MI1BapPVg2i-s2UQR4xJYwpDOfKJactGWzruvfiTOKNIc8Q87WhLl2D4_FGI2jfyYk6itCLOOk1zfZdkjLLNiQg1SDOqC28AT-qKh99wLRKiIuewbJVW5C-0D8YjlquBU6rXdKxONYKnA1NHWfJEbPtsyJIlfUs06wjiMcXrLLc6qy98LL8t0oQcGdUTN4rICGGj-uH3k7-evJyKXC_RECmbcMu2q8GkjZ7lvaVtHh3TGGAA5TTc-7kW3MUjpCLLL06erLxCn3CcGr6Q"
+    p: "-o_gG3DQK9540fR_-WM9dy1YgTR-WSH8FezYnH6I5jwwPB6ocni8XgkWCAiKOPYjK6nhmoTD7DBEetilFIWVj1P0G5fejp_c3H-uQQdd6JW2NBWHfWpADglIEc4NfUgjQ8cXjT1-oIJpXzpX6KOhWEP0yGNBYns7W8CNxbw58vU"
+    q: "tW1D1JK53TIiip9uBVl6EGzXWPFwy8QXlZHbfg3TfhURUF5OYey9Ig-qxh74KvQ-uzwMZOYux0EdUe0OmV-p27huY-nusHjpxKL6xUxpqsLWrYTa6ygRHep3_A50ksN_XIn83oAjBlG4TEePzBsMQb6F4HDrEhpdPeYepKa5PNc"
+    dp: "rl98fnxXU4BjIvJ-MWfAOfVj159ZotxE3FlVMivZSClxBBXt8qRVqze1jmerEhMxzMxQRkHJO9EnhzrIP-zrdbDefGmHqEhW41k0QutGjnvKLpshDMXpyBrrfgChYKPYbu3aVSALxNadUHmA_lUKDyxT6TUyJsBOQf9Sat8gkRU"
+    dq: "d8mf-o-yJmj-w3ZGh0Ovw36JpREs_20GgVvfh1gLpvi0CNNrf1529jFP-SXjh0Di1m7sZAZTJn5IpJoXhI7UMN2SDWgcj-oVtx5A4tnz_qpMYh8RCCjZPF5eQE8vCuQHiIsXKbWC6p40SDELsaC-M_5emHUV0EsV-1OgMehe79s"
+    qi: "IChXZG2VaA05LVfN-nIX03sAZo7ayetTiFKrhGpdmsODw9AoCbBIx4T4SuPnQQBYVkaCAcseyB1XAjqA4Ebm2yvE6yYo-Q8nP-wEo5Mzm18UimCffMox-uSrig1uhuK9oziV-Y11Ytps8yEQq--9BzVTCs1sXAkLVSaO58kGsm4"
+
+  # Mirrors VAmPI's rate_limiting.py config keys.
+  rate_limit_login_attempts: 25
+  rate_limit_request_interval_seconds: 0.0
+
+# ZAP benchmark daemon connection (see docker/docker-compose.zap.yml's
+# zap-crapi service and benchmarks/zap_runner.py). api_key must match
+# the -config api.key= value that service starts with.
+zap:
+  host: "127.0.0.1"
+  port: 8091
+  api_key: "crapi-zap-benchmark-key"

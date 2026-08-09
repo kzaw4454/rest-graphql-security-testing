@@ -224,19 +224,6 @@ __marimo__/
 # Scan outputs, logs, generated reports (per CLAUDE.md — local only, not committed)
 results/
 
-# Local test/scan configuration (may contain target URLs, tokens, scan scope)
-# Keep tracked templates like config/*.example.yaml if it is added
-config/*.yaml
-config/*.yml
-config/*.json
-!config/*.example.yaml
-!config/*.example.yml
-
-# Ground truth reference data for detection-rate/coverage metrics — no
-# credentials, needs to be visible in git history (see CLAUDE.md's
-# Analysis & Metrics section)
-!config/ground_truth.yaml
-
 # Docker volumes / persisted container data for vulnerable targets
 docker/**/data/
 docker/**/volumes/
