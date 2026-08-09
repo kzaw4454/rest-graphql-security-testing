@@ -25,11 +25,10 @@ class AssertionRole(str, Enum):
 
 
 class ResultSource(str, Enum):
-    """Which tool produced a result — orthogonal to assertion_role."""
-
+    """Differentiates logged results come from which tool"""
     FRAMEWORK = "framework"       # this project's own vulnerability test modules
-    ZAP = "zap"                   # OWASP ZAP benchmark scan
-    GRAPHQL_COP = "graphql_cop"   # GraphQL Cop benchmark scan
+    ZAP = "zap"                   # OWASP ZAP benchmark scan for REST
+    GRAPHQL_COP = "graphql_cop"   # GraphQL Cop benchmark scan for GraphQL
 
 
 @dataclass
