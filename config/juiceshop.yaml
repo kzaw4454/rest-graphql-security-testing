@@ -1,40 +1,16 @@
-# Target configuration for OWASP Juice Shop (REST target)
-
 target:
   name: juiceshop
   base_url: "http://127.0.0.1:3000"
   timeout_seconds: 10
 
-  # Endpoints for auth flows and the API1/API3 findings this framework
-  # tests against Juice Shop.
+  # Endpoints for auth flows and the API1/API3 findings
   endpoints:
-    # POST {email, password, passwordRepeat} -> 201. No security-question
-    # field is required at the API level despite the register UI form.
     register: "/api/Users/"
-    # Response: {"authentication": {"token", "bid", "umail"}} — the basket
-    # ID is returned at login, no discovery call needed.
     login: "/rest/user/login"
-    # IDOR target (API1:2023): an authenticated user's own valid token
-    # retrieves *another* user's basket (sequential integer ID) with full
-    # contents. Unauthenticated requests are rejected (401), so only the
-    # ownership check is missing, not authentication itself.
     basket: "/rest/basket/{id}"
-    # Excessive Data Exposure target (API3:2023): this endpoint (auth
-    # required) returns the full user list to any ordinary, non-admin
-    # authenticated user — every user's email, role, and (for role=deluxe
-    # accounts) a real, unmasked deluxeToken value. The `password` field is
-    # masked to a constant placeholder, not a real hash. `/api/Users` (also
-    # auth-required) returns the same shape; `authentication-details` is
-    # used here as the primary exposure target.
     user_exposure: "/rest/user/authentication-details"
 
 # Test identities
-# Synthetic/fictional per Data Protection Act 2018 compliance. Juice Shop
-# has no reseed endpoint reachable mid-session, so registered users/baskets
-# accumulate for as long as the container keeps running. Vulnerability test
-# modules generate a fresh randomized identity per run (uuid suffix on the
-# email) rather than reusing these values as literals; these entries define
-# the shape/password policy only.
 test_users:
   victim:
     email: "victim@juiceshop-test.local"
@@ -42,9 +18,7 @@ test_users:
   attacker:
     email: "attacker@juiceshop-test.local"
     password: "Password123!"
-  # Used by data_exposure.py's ExcessiveUserDataExposureTest: a single
-  # ordinary user reading an endpoint's own over-broad response, distinct
-  # from the victim/attacker roles used for BOLA object-id access tests.
+  # Used by data_exposure.py's ExcessiveUserDataExposureTest
   requester:
     email: "requester@juiceshop-test.local"
     password: "Password123!"
@@ -55,18 +29,11 @@ auth:
 
 # Scan scope / test data lives in config, not hardcoded in source.
 scan:
-  # Field names data_exposure.py checks the user_exposure endpoint's
-  # response for, to decide whether other users' data was leaked.
-  # `password` is checked for being present and not equal to the known
-  # masked placeholder — a genuine leak shows a real hash here instead of
-  # the constant mask string.
   exposure_email_field: "email"
   exposure_password_field: "password"
   exposure_password_mask: "********************************"
 
-# ZAP benchmark daemon connection (see docker/docker-compose.zap.yml's
-# zap-juiceshop service and benchmarks/zap_runner.py). api_key must match
-# the -config api.key= value that service starts with.
+# ZAP benchmark daemon connection
 zap:
   host: "127.0.0.1"
   port: 8092
