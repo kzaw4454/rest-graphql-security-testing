@@ -1,0 +1,25 @@
+metric,value
+target,vampi
+true_positives,12
+false_negatives,0
+total_finding_assertions,12
+detection_rate,1.0000
+precision,1.0000
+recall,1.0000
+f1,1.0000
+documented_vulnerabilities,9
+in_scope_documented_vulnerabilities,9
+tested_vulnerabilities,5
+coverage_rate_all_documented,0.5556
+coverage_rate_in_scope_only,0.5556
+detected_this_run,5
+untested_vulnerabilities,Unauthorized Password Change; Mass Assignment; User and Password Enumeration; RegexDOS (Denial of Service)
+untested_out_of_scope_vulnerabilities,
+tested_not_detected_vulnerabilities,
+severity_critical,6
+severity_high,6
+severity_medium,0
+severity_low,0
+false_positive_rate,not_computed
+precision_f1_caveat,trivially_1.0_no_known_negative_cases
+mann_whitney_u_chi_square_cohens_d,deferred_stretch_goal

@@ -1,0 +1,25 @@
+metric,value
+target,dvga
+true_positives,9
+false_negatives,0
+total_finding_assertions,9
+detection_rate,1.0000
+precision,1.0000
+recall,1.0000
+f1,1.0000
+documented_vulnerabilities,23
+in_scope_documented_vulnerabilities,23
+tested_vulnerabilities,9
+coverage_rate_all_documented,0.3913
+coverage_rate_in_scope_only,0.3913
+detected_this_run,9
+untested_vulnerabilities,Import Paste SSRF via curl; Injection #1; Information Disclosure #1; Information Disclosure #2; Information Disclosure #3; Denial of Service #1; Denial of Service #2; Denial of Service #3; Code Execution #1; Code Execution #2; Reconnaissance #1; Reconnaissance #2; Miscellaneous #1; Miscellaneous #2
+untested_out_of_scope_vulnerabilities,
+tested_not_detected_vulnerabilities,
+severity_critical,3
+severity_high,1
+severity_medium,5
+severity_low,0
+false_positive_rate,not_computed
+precision_f1_caveat,trivially_1.0_no_known_negative_cases
+mann_whitney_u_chi_square_cohens_d,deferred_stretch_goal

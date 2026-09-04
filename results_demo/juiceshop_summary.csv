@@ -1,0 +1,25 @@
+metric,value
+target,juiceshop
+true_positives,3
+false_negatives,0
+total_finding_assertions,3
+detection_rate,1.0000
+precision,1.0000
+recall,1.0000
+f1,1.0000
+documented_vulnerabilities,111
+in_scope_documented_vulnerabilities,2
+tested_vulnerabilities,2
+coverage_rate_all_documented,0.0180
+coverage_rate_in_scope_only,1.0000
+detected_this_run,2
+untested_vulnerabilities,
+untested_out_of_scope_vulnerabilities,"Remaining Juice Shop challenges (UI/DOM-only, out of scope)"
+tested_not_detected_vulnerabilities,
+severity_critical,0
+severity_high,3
+severity_medium,0
+severity_low,0
+false_positive_rate,not_computed
+precision_f1_caveat,trivially_1.0_no_known_negative_cases
+mann_whitney_u_chi_square_cohens_d,deferred_stretch_goal
